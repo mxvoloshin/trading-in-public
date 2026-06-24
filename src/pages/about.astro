@@ -1,0 +1,28 @@
+---
+import AboutHeroImage from '../assets/trade-in-public-hero.png';
+import Layout from '../layouts/BlogPost.astro';
+---
+
+<Layout
+	title="About Trade in Public"
+	description="A public build log for an automated trading system built with software engineering discipline."
+	pubDate={new Date('June 24 2026')}
+	heroImage={AboutHeroImage}
+>
+	<p>
+		Trade in Public is my public engineering journal for building an automated trading system from
+		first principles: requirements, broker/API research, Python implementation, validation, safety
+		gates, deployment, and reviews.
+	</p>
+
+	<p>
+		The project is intentionally framed as a software and learning project. Posts will focus on
+		design choices, tradeoffs, verification, and operational lessons rather than signals or market
+		persuasion.
+	</p>
+
+	<p>
+		Nothing here is financial advice, a recommendation, or a signal service. I may hold or change
+		positions at any time, and public trade/performance notes will include context and caveats.
+	</p>
+</Layout>
