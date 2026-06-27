@@ -10,6 +10,15 @@ npm run dev
 npm run build
 ```
 
+## Architecture
+
+Start here before implementation work:
+
+- `AGENTS.md`
+- `docs/architecture/python-trading-system-foundation.md`
+- `docs/architecture/service-map.md`
+- `docs/architecture/implementation-principles.md`
+
 ## Deploy
 
 This site deploys to GitHub Pages through `.github/workflows/deploy.yml`.
