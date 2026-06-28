@@ -32,6 +32,10 @@ Start here before implementation work:
 - `docs/architecture/service-map.md`
 - `docs/architecture/implementation-principles.md`
 
+## Research Decisions
+
+- `docs/research/historical-market-data-source.md`
+
 ## Python Workspace
 
 The trading system code lives in a `uv` workspace.
