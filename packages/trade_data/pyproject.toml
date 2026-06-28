@@ -3,6 +3,9 @@ name = "trade-data"
 version = "0.0.1"
 description = "Market data ingestion and normalization boundaries."
 requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.28.0",
+]
 
 [build-system]
 requires = ["hatchling"]
