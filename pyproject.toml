@@ -1,0 +1,65 @@
+[project]
+name = "trading-in-public"
+version = "0.0.1"
+description = "Public engineering journal and Python workspace for an automated trading system."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "trade-analytics",
+    "trade-brokers",
+    "trade-core",
+    "trade-data",
+    "trade-execution-app",
+    "trade-reconcile-app",
+    "trade-research-app",
+    "trade-strategies",
+]
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.407",
+    "pytest>=8.4.0",
+    "ruff>=0.12.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = [
+    "apps/execution",
+    "apps/reconcile",
+    "apps/research",
+    "packages/trade_analytics",
+    "packages/trade_brokers",
+    "packages/trade_core",
+    "packages/trade_data",
+    "packages/trade_strategies",
+]
+
+[tool.uv.sources]
+trade-analytics = { workspace = true }
+trade-brokers = { workspace = true }
+trade-core = { workspace = true }
+trade-data = { workspace = true }
+trade-execution-app = { workspace = true }
+trade-reconcile-app = { workspace = true }
+trade-research-app = { workspace = true }
+trade-strategies = { workspace = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.pyright]
+include = ["apps", "packages", "tests"]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"

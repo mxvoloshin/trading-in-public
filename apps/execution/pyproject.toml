@@ -1,0 +1,9 @@
+[project]
+name = "trade-execution-app"
+version = "0.0.1"
+description = "Paper and live execution app entrypoint."
+requires-python = ">=3.12"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
