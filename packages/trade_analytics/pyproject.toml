@@ -1,0 +1,9 @@
+[project]
+name = "trade-analytics"
+version = "0.0.1"
+description = "Analytics, reporting, and reconciliation summaries."
+requires-python = ">=3.12"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

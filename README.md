@@ -4,10 +4,23 @@ A public build log for designing, validating, and operating an automated trading
 
 ## Commands
 
+Site:
+
 ```sh
 npm install
 npm run dev
 npm run build
+```
+
+Python workspace:
+
+```sh
+uv sync
+uv run pytest
+uv run ruff check .
+uv run ruff format .
+uv run ruff format --check .
+uv run pyright
 ```
 
 ## Architecture
@@ -18,6 +31,28 @@ Start here before implementation work:
 - `docs/architecture/python-trading-system-foundation.md`
 - `docs/architecture/service-map.md`
 - `docs/architecture/implementation-principles.md`
+
+## Python Workspace
+
+The trading system code lives in a `uv` workspace.
+
+```text
+packages/
+  trade_core/
+  trade_data/
+  trade_strategies/
+  trade_analytics/
+  trade_brokers/
+
+apps/
+  research/
+  execution/
+  reconcile/
+```
+
+These folders are scaffolded as importable packages only. They should stay behavior-free until later implementation issues define market data, strategy, broker, backtesting, and reconciliation contracts.
+
+Local market data, backtest outputs, credentials, broker exports, and other private artifacts must not be committed.
 
 ## Deploy
 

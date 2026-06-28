@@ -5,6 +5,7 @@ dist/
 
 # dependencies
 node_modules/
+.venv/
 
 # logs
 npm-debug.log*
@@ -16,6 +17,16 @@ pnpm-debug.log*
 # environment variables
 .env
 .env.production
+
+# Python
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.py[cod]
+
+# local trading artifacts
+data/
+backtests/
 
 # macOS-specific files
 .DS_Store

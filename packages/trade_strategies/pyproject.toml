@@ -1,0 +1,9 @@
+[project]
+name = "trade-strategies"
+version = "0.0.1"
+description = "Strategy definitions and research-ready decision modules."
+requires-python = ">=3.12"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
