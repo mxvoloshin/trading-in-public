@@ -1,5 +1,11 @@
 ## Development
 
+Before implementation work, read the public architecture docs first:
+
+- `docs/architecture/python-trading-system-foundation.md`
+- `docs/architecture/service-map.md`
+- `docs/architecture/implementation-principles.md`
+
 When starting the dev server, use background mode:
 
 ```
