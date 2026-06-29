@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -22,7 +23,7 @@ from trade_core import (
     StrategyInputRef,
     StrategyRunId,
 )
-from trade_data import HistoricalBarsRequest, LocalMarketDataStore
+from trade_data import Bar, HistoricalBarsRequest, LocalMarketDataStore
 from trade_data.sessions import get_market_session_config
 from trade_strategies import Strategy, StrategyDecisionContext
 
@@ -62,12 +63,26 @@ class ClosedTrade:
     Parameters:
         entered_at_utc: UTC timestamp of the opening fill.
         exited_at_utc: UTC timestamp of the closing fill.
+        exit_reason: Strategy decision reason that requested the closing fill.
+        exit_price: Simulated closing fill price after slippage.
+        quantity: Simulated closed quantity.
+        post_exit_max_favorable_pnl: Best same-session long-side move after exit,
+            measured from the simulated exit fill price.
         pnl: Net realized PnL after entry/exit commissions and slippage.
     """
 
     entered_at_utc: datetime
     exited_at_utc: datetime
+    exit_reason: str
+    exit_price: Decimal
+    quantity: Decimal
+    post_exit_max_favorable_pnl: Decimal
     pnl: Decimal
+
+    @property
+    def holding_minutes(self) -> int:
+        """Return completed holding time in whole minutes."""
+        return int((self.exited_at_utc - self.entered_at_utc).total_seconds() // 60)
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,8 +165,16 @@ class BacktestSummary:
     profit_factor: Decimal
     max_drawdown: Decimal
     max_drawdown_duration_trades: int
+    average_holding_minutes: Decimal
+    median_holding_minutes: Decimal
+    longest_holding_minutes: int
+    average_post_exit_max_favorable_pnl: Decimal
+    median_post_exit_max_favorable_pnl: Decimal
+    max_post_exit_max_favorable_pnl: Decimal
     daily_breakdown: dict[str, dict[str, str | int]]
     time_of_day_breakdown: dict[str, dict[str, str | int]]
+    exit_reason_breakdown: dict[str, dict[str, str | int]]
+    holding_time_breakdown: dict[str, dict[str, str | int]]
     output_path: Path | None
 
     def to_json_dict(self) -> dict[str, str | int | dict[str, dict[str, str | int]]]:
@@ -190,8 +213,16 @@ class BacktestSummary:
             "profit_factor": str(self.profit_factor),
             "max_drawdown": str(self.max_drawdown),
             "max_drawdown_duration_trades": self.max_drawdown_duration_trades,
+            "average_holding_minutes": str(self.average_holding_minutes),
+            "median_holding_minutes": str(self.median_holding_minutes),
+            "longest_holding_minutes": self.longest_holding_minutes,
+            "average_post_exit_max_favorable_pnl": str(self.average_post_exit_max_favorable_pnl),
+            "median_post_exit_max_favorable_pnl": str(self.median_post_exit_max_favorable_pnl),
+            "max_post_exit_max_favorable_pnl": str(self.max_post_exit_max_favorable_pnl),
             "daily_breakdown": self.daily_breakdown,
             "time_of_day_breakdown": self.time_of_day_breakdown,
+            "exit_reason_breakdown": self.exit_reason_breakdown,
+            "holding_time_breakdown": self.holding_time_breakdown,
         }
 
 
@@ -243,6 +274,7 @@ def run_minimal_backtest(
     fills: list[SimulatedFill] = []
     closed_trades: list[ClosedTrade] = []
     pending_order_intent: OrderIntent | None = None
+    pending_exit_reason: str | None = None
 
     for sequence_number, bar in enumerate(bars, start=1):
         if pending_order_intent is not None:
@@ -278,6 +310,10 @@ def run_minimal_backtest(
                     ClosedTrade(
                         entered_at_utc=open_trade_entered_at_utc,
                         exited_at_utc=fill.filled_at_utc,
+                        exit_reason=pending_exit_reason or "unknown_exit_reason",
+                        exit_price=fill.price,
+                        quantity=fill.quantity,
+                        post_exit_max_favorable_pnl=Decimal("0"),
                         pnl=trade_pnl,
                     )
                 )
@@ -288,6 +324,7 @@ def run_minimal_backtest(
             )
             open_trade_entered_at_utc = fill.filled_at_utc if fill.side == OrderSide.BUY else None
             pending_order_intent = None
+            pending_exit_reason = None
 
         # Bar timestamps identify the start of the OHLCV window. A close-based
         # signal only exists after the bar completes, so the input reference and
@@ -346,9 +383,16 @@ def run_minimal_backtest(
             ),
         )
         pending_order_intent = order_intent
+        if decision.action == DecisionAction.EXIT_LONG:
+            pending_exit_reason = _decision_rule_reason(decision.reason)
 
     # If the data window ends while a position is open, realized PnL alone is
     # incomplete. Mark the open position to the last close and report both parts.
+    closed_trades = _with_post_exit_max_favorable_pnl(
+        closed_trades,
+        bars=bars,
+        timezone=session_config.timezone,
+    )
     unrealized_pnl = _mark_to_market_pnl(
         position=position,
         average_entry_price=average_entry_price,
@@ -360,6 +404,8 @@ def run_minimal_backtest(
         closed_trades,
         timezone=session_config.timezone,
     )
+    exit_reason_breakdown = _exit_reason_breakdown(closed_trades)
+    holding_time_breakdown = _holding_time_breakdown(closed_trades)
     total_execution_costs = total_commissions + total_slippage_cost
     summary = BacktestSummary(
         strategy_name=strategy.name,
@@ -404,8 +450,16 @@ def run_minimal_backtest(
         profit_factor=trade_metrics.profit_factor,
         max_drawdown=trade_metrics.max_drawdown,
         max_drawdown_duration_trades=trade_metrics.max_drawdown_duration_trades,
+        average_holding_minutes=trade_metrics.average_holding_minutes,
+        median_holding_minutes=trade_metrics.median_holding_minutes,
+        longest_holding_minutes=trade_metrics.longest_holding_minutes,
+        average_post_exit_max_favorable_pnl=trade_metrics.average_post_exit_max_favorable_pnl,
+        median_post_exit_max_favorable_pnl=trade_metrics.median_post_exit_max_favorable_pnl,
+        max_post_exit_max_favorable_pnl=trade_metrics.max_post_exit_max_favorable_pnl,
         daily_breakdown=daily_breakdown,
         time_of_day_breakdown=time_of_day_breakdown,
+        exit_reason_breakdown=exit_reason_breakdown,
+        holding_time_breakdown=holding_time_breakdown,
         output_path=output_path,
     )
     if output_path is not None:
@@ -518,6 +572,39 @@ def _mark_to_market_pnl(
     return (last_close - average_entry_price) * position
 
 
+def _with_post_exit_max_favorable_pnl(
+    closed_trades: list[ClosedTrade],
+    *,
+    bars: Sequence[Bar],
+    timezone: str,
+) -> list[ClosedTrade]:
+    """Attach the best same-session long-side move available after each exit.
+
+    This is a diagnostic for "did we exit before the trend resumed?" It stays in
+    the research runner because it needs future bars and must not affect strategy
+    decisions.
+    """
+    zone = ZoneInfo(timezone)
+    annotated_trades: list[ClosedTrade] = []
+    for trade in closed_trades:
+        exit_local_date = trade.exited_at_utc.astimezone(zone).date()
+        future_same_session_highs = (
+            Decimal(str(bar.high))
+            for bar in bars
+            if bar.timestamp_utc >= trade.exited_at_utc
+            and bar.timestamp_utc.astimezone(zone).date() == exit_local_date
+        )
+        max_future_high = max(future_same_session_highs, default=trade.exit_price)
+        post_exit_move = max(max_future_high - trade.exit_price, Decimal("0")) * trade.quantity
+        annotated_trades.append(
+            replace(
+                trade,
+                post_exit_max_favorable_pnl=post_exit_move,
+            )
+        )
+    return annotated_trades
+
+
 @dataclass(frozen=True, slots=True)
 class _TradeMetrics:
     """Completed-trade quality metrics for the public-safe summary."""
@@ -535,11 +622,19 @@ class _TradeMetrics:
     profit_factor: Decimal
     max_drawdown: Decimal
     max_drawdown_duration_trades: int
+    average_holding_minutes: Decimal
+    median_holding_minutes: Decimal
+    longest_holding_minutes: int
+    average_post_exit_max_favorable_pnl: Decimal
+    median_post_exit_max_favorable_pnl: Decimal
+    max_post_exit_max_favorable_pnl: Decimal
 
 
 def _trade_metrics(closed_trades: list[ClosedTrade]) -> _TradeMetrics:
     """Calculate simple distribution metrics from completed trade PnL values."""
     closed_trade_pnls = [trade.pnl for trade in closed_trades]
+    holding_minutes = [Decimal(trade.holding_minutes) for trade in closed_trades]
+    post_exit_max_favorable_pnls = [trade.post_exit_max_favorable_pnl for trade in closed_trades]
     winning_pnls = [pnl for pnl in closed_trade_pnls if pnl > 0]
     losing_pnls = [pnl for pnl in closed_trade_pnls if pnl < 0]
     gross_profit = sum(winning_pnls, Decimal("0"))
@@ -574,6 +669,24 @@ def _trade_metrics(closed_trades: list[ClosedTrade]) -> _TradeMetrics:
         ),
         max_drawdown=_max_drawdown(closed_trade_pnls),
         max_drawdown_duration_trades=_max_drawdown_duration_trades(closed_trade_pnls),
+        average_holding_minutes=(
+            sum(holding_minutes, Decimal("0")) / Decimal(closed_trade_count)
+            if closed_trade_count
+            else Decimal("0")
+        ),
+        median_holding_minutes=_median_decimal(holding_minutes),
+        longest_holding_minutes=(
+            max(trade.holding_minutes for trade in closed_trades) if closed_trades else 0
+        ),
+        average_post_exit_max_favorable_pnl=(
+            sum(post_exit_max_favorable_pnls, Decimal("0")) / Decimal(closed_trade_count)
+            if closed_trade_count
+            else Decimal("0")
+        ),
+        median_post_exit_max_favorable_pnl=_median_decimal(post_exit_max_favorable_pnls),
+        max_post_exit_max_favorable_pnl=(
+            max(post_exit_max_favorable_pnls) if post_exit_max_favorable_pnls else Decimal("0")
+        ),
     )
 
 
@@ -624,11 +737,11 @@ def _closed_trade_breakdown(
 ) -> dict[str, dict[str, str | int]]:
     """Group completed trades by market-local exit date."""
     zone = ZoneInfo(timezone)
-    buckets: dict[str, list[Decimal]] = {}
+    buckets: dict[str, list[ClosedTrade]] = {}
     for trade in closed_trades:
         local_date = trade.exited_at_utc.astimezone(zone).date().isoformat()
-        buckets.setdefault(local_date, []).append(trade.pnl)
-    return {bucket: _pnl_bucket_summary(pnls) for bucket, pnls in sorted(buckets.items())}
+        buckets.setdefault(local_date, []).append(trade)
+    return {bucket: _trade_bucket_summary(trades) for bucket, trades in sorted(buckets.items())}
 
 
 def _time_of_day_breakdown(
@@ -638,7 +751,7 @@ def _time_of_day_breakdown(
 ) -> dict[str, dict[str, str | int]]:
     """Group completed trades into 30-minute market-local exit buckets."""
     zone = ZoneInfo(timezone)
-    buckets: dict[str, list[Decimal]] = {}
+    buckets: dict[str, list[ClosedTrade]] = {}
     for trade in closed_trades:
         local_exit = trade.exited_at_utc.astimezone(zone)
         bucket_minute = 30 if local_exit.minute >= 30 else 0
@@ -649,23 +762,74 @@ def _time_of_day_breakdown(
         )
         bucket_end = bucket_start + timedelta(minutes=30)
         label = f"{bucket_start:%H:%M}-{bucket_end:%H:%M}"
-        buckets.setdefault(label, []).append(trade.pnl)
-    return {bucket: _pnl_bucket_summary(pnls) for bucket, pnls in sorted(buckets.items())}
+        buckets.setdefault(label, []).append(trade)
+    return {bucket: _trade_bucket_summary(trades) for bucket, trades in sorted(buckets.items())}
 
 
-def _pnl_bucket_summary(pnls: list[Decimal]) -> dict[str, str | int]:
-    """Summarize one bucket of completed trade PnL values."""
+def _exit_reason_breakdown(closed_trades: list[ClosedTrade]) -> dict[str, dict[str, str | int]]:
+    """Group completed trades by the strategy rule that requested the exit."""
+    buckets: dict[str, list[ClosedTrade]] = {}
+    for trade in closed_trades:
+        buckets.setdefault(trade.exit_reason, []).append(trade)
+    return {bucket: _trade_bucket_summary(trades) for bucket, trades in sorted(buckets.items())}
+
+
+def _holding_time_breakdown(closed_trades: list[ClosedTrade]) -> dict[str, dict[str, str | int]]:
+    """Group completed trades by elapsed time between entry and exit fills."""
+    buckets: dict[str, list[ClosedTrade]] = {}
+    for trade in closed_trades:
+        buckets.setdefault(_holding_time_bucket(trade.holding_minutes), []).append(trade)
+    return {bucket: _trade_bucket_summary(trades) for bucket, trades in sorted(buckets.items())}
+
+
+def _holding_time_bucket(holding_minutes: int) -> str:
+    """Return a stable human-readable holding-time bucket label."""
+    if holding_minutes < 30:
+        return "00-30m"
+    if holding_minutes < 60:
+        return "30-60m"
+    if holding_minutes < 120:
+        return "60-120m"
+    return "120m+"
+
+
+def _trade_bucket_summary(trades: list[ClosedTrade]) -> dict[str, str | int]:
+    """Summarize one bucket of completed trades."""
+    pnls = [trade.pnl for trade in trades]
+    holding_minutes = [Decimal(trade.holding_minutes) for trade in trades]
+    post_exit_max_favorable_pnls = [trade.post_exit_max_favorable_pnl for trade in trades]
     total_pnl = sum(pnls, Decimal("0"))
     winning_trades = sum(1 for pnl in pnls if pnl > 0)
     losing_trades = sum(1 for pnl in pnls if pnl < 0)
     return {
-        "closed_trades": len(pnls),
+        "closed_trades": len(trades),
         "winning_trades": winning_trades,
         "losing_trades": losing_trades,
         "win_rate": str(Decimal(winning_trades) / Decimal(len(pnls)) if pnls else Decimal("0")),
         "total_pnl": str(total_pnl),
         "expectancy": str(total_pnl / Decimal(len(pnls)) if pnls else Decimal("0")),
+        "average_holding_minutes": str(
+            sum(holding_minutes, Decimal("0")) / Decimal(len(holding_minutes))
+            if holding_minutes
+            else Decimal("0")
+        ),
+        "median_holding_minutes": str(_median_decimal(holding_minutes)),
+        "average_post_exit_max_favorable_pnl": str(
+            sum(post_exit_max_favorable_pnls, Decimal("0"))
+            / Decimal(len(post_exit_max_favorable_pnls))
+            if post_exit_max_favorable_pnls
+            else Decimal("0")
+        ),
+        "median_post_exit_max_favorable_pnl": str(_median_decimal(post_exit_max_favorable_pnls)),
+        "max_post_exit_max_favorable_pnl": str(
+            max(post_exit_max_favorable_pnls) if post_exit_max_favorable_pnls else Decimal("0")
+        ),
     }
+
+
+def _decision_rule_reason(reason: str) -> str:
+    """Strip instrument tagging from a strategy reason for report grouping."""
+    return reason.split(":", maxsplit=1)[0]
 
 
 def _bar_close_time(timeframe: str, timestamp_utc: datetime) -> datetime:

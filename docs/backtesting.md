@@ -102,8 +102,13 @@ The JSON summary also includes research diagnostics for completed trades:
 - median, best, and worst completed trade PnL
 - max drawdown duration measured in completed trades
 - total slippage cost, total commission, and total execution cost
+- average, median, and longest completed-trade holding time
 - daily completed-trade breakdowns
 - 30-minute market-local time-of-day breakdowns
+- exit-reason breakdowns
+- holding-time PnL buckets
+- same-session post-exit max favorable move, measured from each simulated exit
+  fill to the later session high for the same long-side position
 
 ## SPY VWAP Pullback Candidate
 
@@ -222,12 +227,37 @@ uv run python -m trade_research_app backtest run \
 | Cost / closed trade | `$0.1460969459` |
 | Max realized drawdown | `-$40.94114950` |
 | Max drawdown duration | `265` completed trades |
+| Average holding time | `115.47` minutes |
+| Median holding time | `65` minutes |
+| Longest holding time | `345` minutes |
+| Average post-exit max favorable move | `$1.6806` |
+| Median post-exit max favorable move | `$1.0526` |
+| Max post-exit max favorable move | `$12.912716` |
 
 The first time-of-day breakdown shows a useful diagnostic, not a tradable rule:
 most intraday exit buckets lose money after costs, while `15:30-16:00` is
 positive because many winners are forced flat near the end of the day. That
 suggests the next research slice should examine hold time, exit timing, and
 whether early exits are cutting trend-day winners too soon.
+
+The hold-time diagnostics make the exit problem sharper:
+
+| Holding time | Closed trades | Win rate | Total PnL | Expectancy | Median post-exit favorable move |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `00-30m` | `91` | `2.20%` | `-$96.35379742` | `-$1.0588` | `$1.779225` |
+| `30-60m` | `40` | `0.00%` | `-$41.38488091` | `-$1.0346` | `$1.381199` |
+| `60-120m` | `42` | `4.76%` | `-$37.21159462` | `-$0.8860` | `$1.064876` |
+| `120m+` | `105` | `75.24%` | `$136.68232199` | `$1.3017` | `$0.618012` |
+
+The exit-reason breakdown points to `close_below_vwap` as the main damage
+center: `185` closed trades, `7.03%` win rate, `-$165.21270694` total PnL, and
+a median same-session post-exit favorable move of `$1.558434`. The smaller
+`pullback_structure_failed` bucket is also entirely losing (`15` trades,
+`-$14.78125299`) and still has a `$1.522944` median post-exit favorable move.
+The data does not say "hold everything longer"; it says the current early-exit
+rules are often paying the loss before the session's later upside develops.
+Any next variant should therefore test trend-day continuation context before
+loosening exits.
 
 Verdict: this first mechanical VWAP-pullback version is not live-ready. The
 gross edge is effectively flat before commissions, spread, slippage, missed

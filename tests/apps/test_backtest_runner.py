@@ -35,33 +35,45 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
     assert summary.realized_pnl == Decimal("-1.0")
     assert summary.unrealized_pnl == Decimal("0")
     assert summary.total_pnl == Decimal("-1.0")
+    expected_trade_bucket = {
+        "average_holding_minutes": "10",
+        "average_post_exit_max_favorable_pnl": "0.0",
+        "closed_trades": 1,
+        "expectancy": "-1.0",
+        "losing_trades": 1,
+        "max_post_exit_max_favorable_pnl": "0.0",
+        "median_holding_minutes": "10",
+        "median_post_exit_max_favorable_pnl": "0.0",
+        "total_pnl": "-1.0",
+        "win_rate": "0",
+        "winning_trades": 0,
+    }
     assert json.loads(output_path.read_text(encoding="utf-8")) == {
         "approved_orders": 2,
+        "average_holding_minutes": "10",
         "average_loss": "-1.0",
+        "average_post_exit_max_favorable_pnl": "0.0",
         "average_win": "0",
         "bars_loaded": 5,
         "best_trade_pnl": "-1.0",
         "closed_trades": 1,
         "cost_per_closed_trade": "0.0",
-        "daily_breakdown": {
-            "2026-06-26": {
-                "closed_trades": 1,
-                "expectancy": "-1.0",
-                "losing_trades": 1,
-                "total_pnl": "-1.0",
-                "win_rate": "0",
-                "winning_trades": 0,
-            },
-        },
+        "daily_breakdown": {"2026-06-26": expected_trade_bucket},
         "decisions": 5,
         "ending_position": "0",
+        "exit_reason_breakdown": {"close_below_previous_close": expected_trade_bucket},
         "expectancy_per_day": "-1.0",
         "expectancy_per_trade": "-1.0",
         "fills": 2,
+        "holding_time_breakdown": {"00-30m": expected_trade_bucket},
         "instrument_id": "SPY.US",
+        "longest_holding_minutes": 10,
         "losing_trades": 1,
         "max_drawdown": "-1.0",
         "max_drawdown_duration_trades": 1,
+        "max_post_exit_max_favorable_pnl": "0.0",
+        "median_holding_minutes": "10",
+        "median_post_exit_max_favorable_pnl": "0.0",
         "median_trade_pnl": "-1.0",
         "minimum_commission": "0",
         "pending_orders": 0,
@@ -75,16 +87,7 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
         "total_execution_costs": "0.0",
         "total_slippage_cost": "0.0",
         "total_pnl": "-1.0",
-        "time_of_day_breakdown": {
-            "09:30-10:00": {
-                "closed_trades": 1,
-                "expectancy": "-1.0",
-                "losing_trades": 1,
-                "total_pnl": "-1.0",
-                "win_rate": "0",
-                "winning_trades": 0,
-            },
-        },
+        "time_of_day_breakdown": {"09:30-10:00": expected_trade_bucket},
         "unrealized_pnl": "0",
         "win_rate": "0",
         "winning_trades": 0,
@@ -135,6 +138,12 @@ def test_backtest_cli_runs_against_local_cache(
     assert "median_trade_pnl=-1.0" in output
     assert "closed_trades=1" in output
     assert "profit_factor=0" in output
+    assert "average_holding_minutes=10" in output
+    assert "median_holding_minutes=10" in output
+    assert "longest_holding_minutes=10" in output
+    assert "average_post_exit_max_favorable_pnl=0.0" in output
+    assert "median_post_exit_max_favorable_pnl=0.0" in output
+    assert "max_post_exit_max_favorable_pnl=0.0" in output
 
 
 def test_minimal_backtest_applies_commission_costs(tmp_path: Path) -> None:
@@ -197,26 +206,29 @@ def test_minimal_backtest_reports_trade_breakdowns(tmp_path: Path) -> None:
     assert summary.best_trade_pnl == Decimal("-1.0")
     assert summary.worst_trade_pnl == Decimal("-1.0")
     assert summary.max_drawdown_duration_trades == 1
-    assert summary.daily_breakdown == {
-        "2026-06-26": {
-            "closed_trades": 1,
-            "expectancy": "-1.0",
-            "losing_trades": 1,
-            "total_pnl": "-1.0",
-            "win_rate": "0",
-            "winning_trades": 0,
-        },
+    assert summary.average_holding_minutes == Decimal("10")
+    assert summary.median_holding_minutes == Decimal("10")
+    assert summary.longest_holding_minutes == 10
+    assert summary.average_post_exit_max_favorable_pnl == Decimal("0.0")
+    assert summary.median_post_exit_max_favorable_pnl == Decimal("0.0")
+    assert summary.max_post_exit_max_favorable_pnl == Decimal("0.0")
+    expected_trade_bucket = {
+        "average_holding_minutes": "10",
+        "average_post_exit_max_favorable_pnl": "0.0",
+        "closed_trades": 1,
+        "expectancy": "-1.0",
+        "losing_trades": 1,
+        "max_post_exit_max_favorable_pnl": "0.0",
+        "median_holding_minutes": "10",
+        "median_post_exit_max_favorable_pnl": "0.0",
+        "total_pnl": "-1.0",
+        "win_rate": "0",
+        "winning_trades": 0,
     }
-    assert summary.time_of_day_breakdown == {
-        "09:30-10:00": {
-            "closed_trades": 1,
-            "expectancy": "-1.0",
-            "losing_trades": 1,
-            "total_pnl": "-1.0",
-            "win_rate": "0",
-            "winning_trades": 0,
-        },
-    }
+    assert summary.daily_breakdown == {"2026-06-26": expected_trade_bucket}
+    assert summary.time_of_day_breakdown == {"09:30-10:00": expected_trade_bucket}
+    assert summary.exit_reason_breakdown == {"close_below_previous_close": expected_trade_bucket}
+    assert summary.holding_time_breakdown == {"00-30m": expected_trade_bucket}
 
 
 def _request() -> HistoricalBarsRequest:

@@ -165,6 +165,12 @@ def _handle_backtest_run(args: argparse.Namespace) -> int:
     print(f"profit_factor={summary.profit_factor}")
     print(f"max_drawdown={summary.max_drawdown}")
     print(f"max_drawdown_duration_trades={summary.max_drawdown_duration_trades}")
+    print(f"average_holding_minutes={summary.average_holding_minutes}")
+    print(f"median_holding_minutes={summary.median_holding_minutes}")
+    print(f"longest_holding_minutes={summary.longest_holding_minutes}")
+    print(f"average_post_exit_max_favorable_pnl={summary.average_post_exit_max_favorable_pnl}")
+    print(f"median_post_exit_max_favorable_pnl={summary.median_post_exit_max_favorable_pnl}")
+    print(f"max_post_exit_max_favorable_pnl={summary.max_post_exit_max_favorable_pnl}")
     if summary.output_path is not None:
         print(f"output={summary.output_path}")
     return 0
