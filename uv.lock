@@ -232,16 +232,32 @@ name = "trade-research-app"
 version = "0.0.1"
 source = { editable = "apps/research" }
 dependencies = [
+    { name = "trade-core" },
     { name = "trade-data" },
+    { name = "trade-strategies" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "trade-data", editable = "packages/trade_data" }]
+requires-dist = [
+    { name = "trade-core", editable = "packages/trade_core" },
+    { name = "trade-data", editable = "packages/trade_data" },
+    { name = "trade-strategies", editable = "packages/trade_strategies" },
+]
 
 [[package]]
 name = "trade-strategies"
 version = "0.0.1"
 source = { editable = "packages/trade_strategies" }
+dependencies = [
+    { name = "trade-core" },
+    { name = "trade-data" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "trade-core", editable = "packages/trade_core" },
+    { name = "trade-data", editable = "packages/trade_data" },
+]
 
 [[package]]
 name = "trading-in-public"

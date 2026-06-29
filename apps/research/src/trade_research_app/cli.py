@@ -4,15 +4,24 @@ from __future__ import annotations
 
 import argparse
 from datetime import UTC, date, datetime, time, timedelta
+from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from trade_data import AlpacaHistoricalBarsSource, HistoricalBarsRequest, Instrument
 from trade_data.sessions import get_market_session_config
 from trade_data.store import LocalMarketDataStore
+from trade_strategies import get_strategy, list_strategy_names
+
+from trade_research_app.backtest import run_minimal_backtest
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the research command line interface.
+
+    Parameters:
+        argv: Optional argument list for tests. `None` uses process arguments.
+    """
     parser = _build_parser()
     args = parser.parse_args(argv)
     handler = getattr(args, "handler", None)
@@ -23,6 +32,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    """Create the research CLI parser with market-data and backtest commands."""
     parser = argparse.ArgumentParser(prog="trade_research_app")
     subcommands = parser.add_subparsers(dest="command")
 
@@ -39,10 +49,27 @@ def _build_parser() -> argparse.ArgumentParser:
     fetch.add_argument("--cache-dir", default=".data")
     fetch.set_defaults(handler=_handle_market_data_fetch)
 
+    backtest = subcommands.add_parser("backtest")
+    backtest_subcommands = backtest.add_subparsers(dest="backtest_command")
+
+    run = backtest_subcommands.add_parser("run")
+    run.add_argument("--strategy", default="close-momentum", choices=list_strategy_names())
+    run.add_argument("--symbol", required=True)
+    run.add_argument("--timeframe", default="5Min")
+    run.add_argument("--start", required=True, help="inclusive market-local date, YYYY-MM-DD")
+    run.add_argument("--end", required=True, help="inclusive market-local date, YYYY-MM-DD")
+    run.add_argument("--market", default="XNYS")
+    run.add_argument("--session", default="regular", choices=["regular", "extended", "all"])
+    run.add_argument("--cache-dir", default=".data")
+    run.add_argument("--quantity", default="1")
+    run.add_argument("--output", default=None)
+    run.set_defaults(handler=_handle_backtest_run)
+
     return parser
 
 
 def _handle_market_data_fetch(args: argparse.Namespace) -> int:
+    """Fetch historical bars from Alpaca and write normalized local cache files."""
     session_config = get_market_session_config(str(args.market))
     start_date = date.fromisoformat(str(args.start))
     end_date = date.fromisoformat(str(args.end))
@@ -79,13 +106,91 @@ def _handle_market_data_fetch(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_backtest_run(args: argparse.Namespace) -> int:
+    """Run a selected strategy against locally cached normalized bars."""
+    request = _historical_bars_request_from_args(args)
+    output_path = (
+        Path(str(args.output))
+        if args.output is not None
+        else _default_backtest_output_path(
+            cache_dir=Path(str(args.cache_dir)),
+            request=request,
+            strategy_name=str(args.strategy),
+        )
+    )
+    summary = run_minimal_backtest(
+        request=request,
+        cache_dir=Path(str(args.cache_dir)),
+        output_path=output_path,
+        strategy=get_strategy(str(args.strategy)),
+        quantity=Decimal(str(args.quantity)),
+    )
+
+    print(f"strategy={summary.strategy_name}")
+    print(f"bars_loaded={summary.bars_loaded}")
+    print(f"decisions={summary.decisions}")
+    print(f"approved_orders={summary.approved_orders}")
+    print(f"fills={summary.fills}")
+    print(f"pending_orders={summary.pending_orders}")
+    print(f"ending_position={summary.ending_position}")
+    print(f"realized_pnl={summary.realized_pnl}")
+    print(f"unrealized_pnl={summary.unrealized_pnl}")
+    print(f"total_pnl={summary.total_pnl}")
+    if summary.output_path is not None:
+        print(f"output={summary.output_path}")
+    return 0
+
+
+def _historical_bars_request_from_args(args: argparse.Namespace) -> HistoricalBarsRequest:
+    """Convert CLI args into the provider-neutral historical bars request."""
+    session_config = get_market_session_config(str(args.market))
+    start_date = date.fromisoformat(str(args.start))
+    end_date = date.fromisoformat(str(args.end))
+    if start_date > end_date:
+        msg = "--start must be on or before --end"
+        raise ValueError(msg)
+
+    start_utc, end_utc = inclusive_local_dates_to_utc_range(
+        start_date=start_date,
+        end_date=end_date,
+        timezone=session_config.timezone,
+    )
+    return HistoricalBarsRequest(
+        instrument=Instrument.us_equity(symbol=str(args.symbol), market=str(args.market)),
+        timeframe=str(args.timeframe),
+        start_utc=start_utc,
+        end_utc=end_utc,
+        market=str(args.market),
+        session=str(args.session),
+    )
+
+
+def _default_backtest_output_path(
+    *,
+    cache_dir: Path,
+    request: HistoricalBarsRequest,
+    strategy_name: str,
+) -> Path:
+    """Return the default gitignored summary path for one strategy run."""
+    start = request.start_utc.strftime("%Y%m%dT%H%M%SZ")
+    end = request.end_utc.strftime("%Y%m%dT%H%M%SZ")
+    filename = f"{request.instrument.instrument_id}_{request.timeframe}_{start}_{end}.json"
+    return cache_dir / "backtests" / "minimal" / strategy_name / filename
+
+
 def inclusive_local_dates_to_utc_range(
     *,
     start_date: date,
     end_date: date,
     timezone: str,
 ) -> tuple[datetime, datetime]:
-    """Convert inclusive market-local dates to a UTC half-open range."""
+    """Convert inclusive market-local dates to a UTC half-open range.
+
+    Parameters:
+        start_date: First market-local calendar date to include.
+        end_date: Last market-local calendar date to include.
+        timezone: IANA market timezone used to translate dates to UTC.
+    """
     zone = ZoneInfo(timezone)
     start_local = datetime.combine(start_date, time.min, tzinfo=zone)
     end_local = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=zone)
