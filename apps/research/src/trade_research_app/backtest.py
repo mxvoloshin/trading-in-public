@@ -68,6 +68,10 @@ class ClosedTrade:
         quantity: Simulated closed quantity.
         post_exit_max_favorable_pnl: Best same-session long-side move after exit,
             measured from the simulated exit fill price.
+        gap_bucket: Session gap bucket derived from prior regular-session close.
+        opening_range_state: Session state after the first 30 minutes.
+        trend_state: Full-session VWAP/close trend proxy.
+        relative_volume_bucket: Session volume versus trailing-session baseline.
         pnl: Net realized PnL after entry/exit commissions and slippage.
     """
 
@@ -77,6 +81,10 @@ class ClosedTrade:
     exit_price: Decimal
     quantity: Decimal
     post_exit_max_favorable_pnl: Decimal
+    gap_bucket: str
+    opening_range_state: str
+    trend_state: str
+    relative_volume_bucket: str
     pnl: Decimal
 
     @property
@@ -175,6 +183,10 @@ class BacktestSummary:
     time_of_day_breakdown: dict[str, dict[str, str | int]]
     exit_reason_breakdown: dict[str, dict[str, str | int]]
     holding_time_breakdown: dict[str, dict[str, str | int]]
+    gap_breakdown: dict[str, dict[str, str | int]]
+    opening_range_breakdown: dict[str, dict[str, str | int]]
+    trend_breakdown: dict[str, dict[str, str | int]]
+    relative_volume_breakdown: dict[str, dict[str, str | int]]
     output_path: Path | None
 
     def to_json_dict(self) -> dict[str, str | int | dict[str, dict[str, str | int]]]:
@@ -223,6 +235,10 @@ class BacktestSummary:
             "time_of_day_breakdown": self.time_of_day_breakdown,
             "exit_reason_breakdown": self.exit_reason_breakdown,
             "holding_time_breakdown": self.holding_time_breakdown,
+            "gap_breakdown": self.gap_breakdown,
+            "opening_range_breakdown": self.opening_range_breakdown,
+            "trend_breakdown": self.trend_breakdown,
+            "relative_volume_breakdown": self.relative_volume_breakdown,
         }
 
 
@@ -314,6 +330,10 @@ def run_minimal_backtest(
                         exit_price=fill.price,
                         quantity=fill.quantity,
                         post_exit_max_favorable_pnl=Decimal("0"),
+                        gap_bucket="unknown_gap",
+                        opening_range_state="unknown_opening_range",
+                        trend_state="unknown_trend",
+                        relative_volume_bucket="unknown_relative_volume",
                         pnl=trade_pnl,
                     )
                 )
@@ -393,6 +413,11 @@ def run_minimal_backtest(
         bars=bars,
         timezone=session_config.timezone,
     )
+    closed_trades = _with_regime_tags(
+        closed_trades,
+        bars=bars,
+        timezone=session_config.timezone,
+    )
     unrealized_pnl = _mark_to_market_pnl(
         position=position,
         average_entry_price=average_entry_price,
@@ -406,6 +431,16 @@ def run_minimal_backtest(
     )
     exit_reason_breakdown = _exit_reason_breakdown(closed_trades)
     holding_time_breakdown = _holding_time_breakdown(closed_trades)
+    gap_breakdown = _regime_breakdown(closed_trades, tag_name="gap_bucket")
+    opening_range_breakdown = _regime_breakdown(
+        closed_trades,
+        tag_name="opening_range_state",
+    )
+    trend_breakdown = _regime_breakdown(closed_trades, tag_name="trend_state")
+    relative_volume_breakdown = _regime_breakdown(
+        closed_trades,
+        tag_name="relative_volume_bucket",
+    )
     total_execution_costs = total_commissions + total_slippage_cost
     summary = BacktestSummary(
         strategy_name=strategy.name,
@@ -460,6 +495,10 @@ def run_minimal_backtest(
         time_of_day_breakdown=time_of_day_breakdown,
         exit_reason_breakdown=exit_reason_breakdown,
         holding_time_breakdown=holding_time_breakdown,
+        gap_breakdown=gap_breakdown,
+        opening_range_breakdown=opening_range_breakdown,
+        trend_breakdown=trend_breakdown,
+        relative_volume_breakdown=relative_volume_breakdown,
         output_path=output_path,
     )
     if output_path is not None:
@@ -603,6 +642,228 @@ def _with_post_exit_max_favorable_pnl(
             )
         )
     return annotated_trades
+
+
+@dataclass(frozen=True, slots=True)
+class SessionRegimeTags:
+    """Reporting-only tags derived from one market-local session."""
+
+    gap_bucket: str
+    opening_range_state: str
+    trend_state: str
+    relative_volume_bucket: str
+
+
+def _with_regime_tags(
+    closed_trades: list[ClosedTrade],
+    *,
+    bars: Sequence[Bar],
+    timezone: str,
+) -> list[ClosedTrade]:
+    """Attach session regime tags to each completed trade.
+
+    The tags are calculated after execution so they can explain the backtest
+    without becoming implicit strategy inputs.
+    """
+    zone = ZoneInfo(timezone)
+    session_tags = session_regime_tags(bars, timezone=timezone)
+    tagged_trades: list[ClosedTrade] = []
+    for trade in closed_trades:
+        local_date = trade.exited_at_utc.astimezone(zone).date().isoformat()
+        tags = session_tags.get(
+            local_date,
+            SessionRegimeTags(
+                gap_bucket="unknown_gap",
+                opening_range_state="unknown_opening_range",
+                trend_state="unknown_trend",
+                relative_volume_bucket="unknown_relative_volume",
+            ),
+        )
+        tagged_trades.append(
+            replace(
+                trade,
+                gap_bucket=tags.gap_bucket,
+                opening_range_state=tags.opening_range_state,
+                trend_state=tags.trend_state,
+                relative_volume_bucket=tags.relative_volume_bucket,
+            )
+        )
+    return tagged_trades
+
+
+def session_regime_tags(
+    bars: Sequence[Bar],
+    *,
+    timezone: str,
+) -> dict[str, SessionRegimeTags]:
+    """Derive simple session tags from normalized OHLCV bars."""
+    zone = ZoneInfo(timezone)
+    session_bars = _bars_by_local_date(bars, timezone=timezone)
+    trailing_volumes: list[Decimal] = []
+    previous_close: Decimal | None = None
+    tags_by_date: dict[str, SessionRegimeTags] = {}
+
+    for local_date, bars_for_date in sorted(session_bars.items()):
+        current_open = Decimal(str(bars_for_date[0].open))
+        current_close = Decimal(str(bars_for_date[-1].close))
+        session_volume = sum((Decimal(bar.volume) for bar in bars_for_date), Decimal("0"))
+        tags_by_date[local_date] = SessionRegimeTags(
+            gap_bucket=_gap_bucket(
+                current_open=current_open,
+                previous_close=previous_close,
+            ),
+            opening_range_state=_opening_range_state(
+                bars_for_date,
+                zone=zone,
+            ),
+            trend_state=_trend_state(
+                bars_for_date,
+                current_open=current_open,
+                current_close=current_close,
+            ),
+            relative_volume_bucket=_relative_volume_bucket(
+                session_volume=session_volume,
+                trailing_volumes=trailing_volumes,
+            ),
+        )
+        previous_close = current_close
+        trailing_volumes.append(session_volume)
+
+    return tags_by_date
+
+
+def _bars_by_local_date(
+    bars: Sequence[Bar],
+    *,
+    timezone: str,
+) -> dict[str, list[Bar]]:
+    """Group bars into market-local sessions while preserving bar order."""
+    zone = ZoneInfo(timezone)
+    sessions: dict[str, list[Bar]] = {}
+    for bar in bars:
+        local_date = bar.timestamp_utc.astimezone(zone).date().isoformat()
+        sessions.setdefault(local_date, []).append(bar)
+    return {
+        local_date: sorted(values, key=lambda value: value.timestamp_utc)
+        for local_date, values in sessions.items()
+    }
+
+
+def _gap_bucket(
+    *,
+    current_open: Decimal,
+    previous_close: Decimal | None,
+) -> str:
+    """Bucket the current session open versus the prior session close."""
+    if previous_close is None or previous_close == 0:
+        return "unknown_gap"
+    gap_pct = (current_open - previous_close) / previous_close
+    if gap_pct >= Decimal("0.005"):
+        return "large_gap_up"
+    if gap_pct >= Decimal("0.001"):
+        return "gap_up"
+    if gap_pct <= Decimal("-0.005"):
+        return "large_gap_down"
+    if gap_pct <= Decimal("-0.001"):
+        return "gap_down"
+    return "flat_gap"
+
+
+def _opening_range_state(
+    bars: Sequence[Bar],
+    *,
+    zone: ZoneInfo,
+) -> str:
+    """Classify price location after the first 30 regular-session minutes."""
+    opening_bars = [
+        bar
+        for bar in bars
+        if bar.timestamp_utc.astimezone(zone).time().hour == 9
+        and bar.timestamp_utc.astimezone(zone).time().minute < 60
+    ][:6]
+    reference_bar = next(
+        (bar for bar in bars if bar.timestamp_utc.astimezone(zone).time().hour >= 10),
+        None,
+    )
+    if not opening_bars or reference_bar is None:
+        return "unknown_opening_range"
+
+    opening_high = max(Decimal(str(bar.high)) for bar in opening_bars)
+    opening_low = min(Decimal(str(bar.low)) for bar in opening_bars)
+    reference_close = Decimal(str(reference_bar.close))
+    if reference_close > opening_high:
+        return "above_opening_range"
+    if reference_close < opening_low:
+        return "below_opening_range"
+    return "inside_opening_range"
+
+
+def _trend_state(
+    bars: Sequence[Bar],
+    *,
+    current_open: Decimal,
+    current_close: Decimal,
+) -> str:
+    """Classify the full session with a simple VWAP and close-location proxy."""
+    opening_window = bars[:6]
+    if not opening_window:
+        return "unknown_trend"
+    opening_vwap = _vwap(opening_window)
+    session_vwap = _vwap(bars)
+    if opening_vwap is None or session_vwap is None:
+        return "unknown_trend"
+    if (
+        session_vwap > opening_vwap
+        and current_close > session_vwap
+        and current_close > current_open
+    ):
+        return "trend_up"
+    if (
+        session_vwap < opening_vwap
+        and current_close < session_vwap
+        and current_close < current_open
+    ):
+        return "trend_down"
+    return "chop_or_mixed"
+
+
+def _vwap(bars: Sequence[Bar]) -> Decimal | None:
+    """Calculate VWAP from typical price and bar volume."""
+    total_volume = sum((Decimal(bar.volume) for bar in bars), Decimal("0"))
+    if total_volume == 0:
+        return None
+    total_price_volume = sum(
+        (
+            (
+                (Decimal(str(bar.high)) + Decimal(str(bar.low)) + Decimal(str(bar.close)))
+                / Decimal("3")
+            )
+            * Decimal(bar.volume)
+            for bar in bars
+        ),
+        Decimal("0"),
+    )
+    return total_price_volume / total_volume
+
+
+def _relative_volume_bucket(
+    *,
+    session_volume: Decimal,
+    trailing_volumes: Sequence[Decimal],
+) -> str:
+    """Bucket session volume against the average of up to 20 prior sessions."""
+    if not trailing_volumes:
+        return "unknown_relative_volume"
+    trailing_window = trailing_volumes[-20:]
+    baseline = sum(trailing_window, Decimal("0")) / Decimal(len(trailing_window))
+    if baseline == 0:
+        return "unknown_relative_volume"
+    relative_volume = session_volume / baseline
+    if relative_volume >= Decimal("1.2"):
+        return "high_relative_volume"
+    if relative_volume <= Decimal("0.8"):
+        return "low_relative_volume"
+    return "normal_relative_volume"
 
 
 @dataclass(frozen=True, slots=True)
@@ -779,6 +1040,18 @@ def _holding_time_breakdown(closed_trades: list[ClosedTrade]) -> dict[str, dict[
     buckets: dict[str, list[ClosedTrade]] = {}
     for trade in closed_trades:
         buckets.setdefault(_holding_time_bucket(trade.holding_minutes), []).append(trade)
+    return {bucket: _trade_bucket_summary(trades) for bucket, trades in sorted(buckets.items())}
+
+
+def _regime_breakdown(
+    closed_trades: list[ClosedTrade],
+    *,
+    tag_name: str,
+) -> dict[str, dict[str, str | int]]:
+    """Group completed trades by one reporting-only regime tag."""
+    buckets: dict[str, list[ClosedTrade]] = {}
+    for trade in closed_trades:
+        buckets.setdefault(str(getattr(trade, tag_name)), []).append(trade)
     return {bucket: _trade_bucket_summary(trades) for bucket, trades in sorted(buckets.items())}
 
 

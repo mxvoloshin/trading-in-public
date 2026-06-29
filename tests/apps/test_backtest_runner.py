@@ -8,7 +8,11 @@ from pathlib import Path
 from pytest import CaptureFixture
 from trade_data import Bar, HistoricalBarsRequest, Instrument, LocalMarketDataStore
 from trade_data.sessions import MarketSessionConfig
-from trade_research_app.backtest import BacktestCostModel, run_minimal_backtest
+from trade_research_app.backtest import (
+    BacktestCostModel,
+    run_minimal_backtest,
+    session_regime_tags,
+)
 from trade_research_app.cli import main
 from trade_strategies import get_strategy
 
@@ -65,6 +69,7 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
         "expectancy_per_day": "-1.0",
         "expectancy_per_trade": "-1.0",
         "fills": 2,
+        "gap_breakdown": {"unknown_gap": expected_trade_bucket},
         "holding_time_breakdown": {"00-30m": expected_trade_bucket},
         "instrument_id": "SPY.US",
         "longest_holding_minutes": 10,
@@ -76,9 +81,11 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
         "median_post_exit_max_favorable_pnl": "0.0",
         "median_trade_pnl": "-1.0",
         "minimum_commission": "0",
+        "opening_range_breakdown": {"unknown_opening_range": expected_trade_bucket},
         "pending_orders": 0,
         "profit_factor": "0",
         "realized_pnl": "-1.0",
+        "relative_volume_breakdown": {"unknown_relative_volume": expected_trade_bucket},
         "commission_per_share": "0",
         "slippage_bps": "0",
         "strategy_name": "close-momentum",
@@ -88,6 +95,7 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
         "total_slippage_cost": "0.0",
         "total_pnl": "-1.0",
         "time_of_day_breakdown": {"09:30-10:00": expected_trade_bucket},
+        "trend_breakdown": {"chop_or_mixed": expected_trade_bucket},
         "unrealized_pnl": "0",
         "win_rate": "0",
         "winning_trades": 0,
@@ -229,6 +237,34 @@ def test_minimal_backtest_reports_trade_breakdowns(tmp_path: Path) -> None:
     assert summary.time_of_day_breakdown == {"09:30-10:00": expected_trade_bucket}
     assert summary.exit_reason_breakdown == {"close_below_previous_close": expected_trade_bucket}
     assert summary.holding_time_breakdown == {"00-30m": expected_trade_bucket}
+    assert summary.gap_breakdown == {"unknown_gap": expected_trade_bucket}
+    assert summary.opening_range_breakdown == {"unknown_opening_range": expected_trade_bucket}
+    assert summary.trend_breakdown == {"chop_or_mixed": expected_trade_bucket}
+    assert summary.relative_volume_breakdown == {"unknown_relative_volume": expected_trade_bucket}
+
+
+def test_session_regime_tags_bucket_gap_opening_range_trend_and_volume() -> None:
+    bars = (
+        *[
+            _bar_at(day=26, hour=13, minute=30 + offset, open=100.0, close=100.0, volume=100)
+            for offset in range(0, 30, 5)
+        ],
+        _bar_at(day=26, hour=14, minute=0, open=100.0, close=100.0, volume=100),
+        *[
+            _bar_at(day=29, hour=13, minute=30 + offset, open=101.0, close=101.0, volume=500)
+            for offset in range(0, 30, 5)
+        ],
+        _bar_at(day=29, hour=14, minute=0, open=101.1, close=102.0, volume=1_000),
+        _bar_at(day=29, hour=17, minute=0, open=102.0, close=104.0, volume=1_000),
+    )
+
+    tags = session_regime_tags(bars, timezone="America/New_York")
+
+    assert tags["2026-06-26"].gap_bucket == "unknown_gap"
+    assert tags["2026-06-29"].gap_bucket == "large_gap_up"
+    assert tags["2026-06-29"].opening_range_state == "above_opening_range"
+    assert tags["2026-06-29"].trend_state == "trend_up"
+    assert tags["2026-06-29"].relative_volume_bucket == "high_relative_volume"
 
 
 def _request() -> HistoricalBarsRequest:
@@ -265,5 +301,27 @@ def _bar(*, open: float, close: float, minute: int) -> Bar:
         low=min(open, close),
         close=close,
         volume=1_000,
+        session="regular",
+    )
+
+
+def _bar_at(
+    *,
+    day: int,
+    hour: int,
+    minute: int,
+    open: float,
+    close: float,
+    volume: int,
+) -> Bar:
+    return Bar(
+        instrument_id="SPY.US",
+        timeframe="5Min",
+        timestamp_utc=datetime(2026, 6, day, hour, minute, tzinfo=UTC),
+        open=open,
+        high=max(open, close),
+        low=min(open, close),
+        close=close,
+        volume=volume,
         session="regular",
     )

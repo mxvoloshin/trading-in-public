@@ -107,8 +107,19 @@ The JSON summary also includes research diagnostics for completed trades:
 - 30-minute market-local time-of-day breakdowns
 - exit-reason breakdowns
 - holding-time PnL buckets
+- gap, opening-range, trend/chop, and relative-volume regime breakdowns
 - same-session post-exit max favorable move, measured from each simulated exit
   fill to the later session high for the same long-side position
+
+The first regime tags are reporting-only diagnostics:
+
+- `gap_breakdown` compares the session open to the prior regular-session close.
+- `opening_range_breakdown` classifies the 10:00 New York close versus the
+  first 30-minute opening range.
+- `trend_breakdown` uses full-session VWAP direction and close location to
+  split `trend_up`, `trend_down`, and `chop_or_mixed` sessions.
+- `relative_volume_breakdown` compares session volume to the trailing 20-session
+  average when enough prior sessions exist.
 
 ## SPY VWAP Pullback Candidate
 
@@ -259,6 +270,19 @@ rules are often paying the loss before the session's later upside develops.
 Any next variant should therefore test trend-day continuation context before
 loosening exits.
 
+The first regime split supports that direction:
+
+| Regime tag | Closed trades | Win rate | Total PnL | Expectancy |
+| --- | ---: | ---: | ---: | ---: |
+| `trend_up` | `144` | `49.31%` | `$77.38624234` | `$0.5374` |
+| `chop_or_mixed` | `91` | `13.19%` | `-$65.88044519` | `-$0.7240` |
+| `trend_down` | `43` | `0.00%` | `-$49.77374811` | `-$1.1575` |
+
+This is still a descriptive split with full-session information, not a tradable
+filter by itself. It says the next implementable candidate should approximate
+`trend_up` conditions from information available early enough in the session,
+then compare against the same execution-cost stress.
+
 Verdict: this first mechanical VWAP-pullback version is not live-ready. The
 gross edge is effectively flat before commissions, spread, slippage, missed
 fills, taxes, borrow/margin constraints, and operational risk. A one-share gross
@@ -286,10 +310,10 @@ strategy tuning:
 1. Add trade-level analytics: expectancy, median trade PnL, MAE/MFE, holding
    time, drawdown duration, contribution concentration, and daily return
    distribution.
-2. Add diagnostic breakdowns: time of day, day, gap bucket, opening-range state,
-   trend/chop state, relative-volume bucket, and cost sensitivity.
-3. Add execution stress reporting: one-way slippage grids, commission scenarios,
+2. Add execution stress reporting: one-way slippage grids, commission scenarios,
    gross edge consumed by costs, and adverse-selection checks after fills.
+3. Add robustness diagnostics: contribution concentration, chronological splits,
+   and simple walk-forward summaries.
 4. Add event-day tagging for scheduled macro days before mixing those sessions
    into ordinary-session results.
 5. Implement the first narrowed candidate, `trend-day-vwap-reclaim`, through the
