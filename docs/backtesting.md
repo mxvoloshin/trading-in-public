@@ -212,6 +212,33 @@ the trusted normalized cache. Next research should add explicit cost/slippage
 modeling, daily performance distribution, time-of-day breakdowns, and stricter
 regime filters before any paper/live validation.
 
+### Next Research Plan
+
+The external deep-research review is saved in
+`docs/research/spy-vwap-pullback-deep-research.md`. Its conclusion is to reject
+the baseline strategy in its current form and run only one disciplined refinement
+cycle to test whether a narrower regime-filtered continuation edge exists.
+
+The next implementation work should focus on research infrastructure before
+strategy tuning:
+
+1. Add trade-level analytics: expectancy, median trade PnL, MAE/MFE, holding
+   time, drawdown duration, contribution concentration, and daily return
+   distribution.
+2. Add diagnostic breakdowns: time of day, day, gap bucket, opening-range state,
+   trend/chop state, relative-volume bucket, and cost sensitivity.
+3. Add execution stress reporting: one-way slippage grids, commission scenarios,
+   gross edge consumed by costs, and adverse-selection checks after fills.
+4. Add event-day tagging for scheduled macro days before mixing those sessions
+   into ordinary-session results.
+5. Implement the first narrowed candidate, `trend-day-vwap-reclaim`, through the
+   existing strategy registry so it can be compared against
+   `spy-vwap-pullback` with identical execution semantics.
+
+Do not optimize a long list of parameters before these diagnostics exist. The
+current gross profit factor of `1.0140` is too close to flat, so broad parameter
+search would mostly increase overfitting risk.
+
 ## Public Safety
 
 Do not commit `.data/`, real market data files, private account data, credentials,
