@@ -66,6 +66,10 @@ Use dependencies for heavy or proven infrastructure:
 
 Avoid tiny convenience packages unless they remove meaningful complexity.
 
+Current runtime dependencies with explicit reasons:
+
+- `httpx` in `packages/trade_data`: direct Alpaca historical market data HTTP integration. The dependency is isolated behind the `trade_data` provider boundary and keeps request construction, error handling, and offline transport tests clean.
+
 ## Document Runtime Dependencies
 
 Every runtime dependency must have a clear reason.

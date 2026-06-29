@@ -54,6 +54,15 @@ Package ownership:
 
 Do not add trading behavior to scaffold packages without an implementation issue that defines the behavior. Keep private market data, broker exports, credentials, and backtest artifacts out of git.
 
+## Python Comments
+
+Write Python with helpful orienting comments for readers who are newer to Python and this trading domain.
+
+- Prefer comments that explain intent, data flow, trading assumptions, provider quirks, or why a boundary exists.
+- Add docstrings or short comments before non-obvious blocks such as normalization, cache merging, time/session conversion, API pagination, and safety checks.
+- Do not narrate obvious syntax or repeat what a function name already says.
+- Keep comments accurate and update them when behavior changes.
+
 ## Astro Site
 
 When starting the dev server, use background mode:

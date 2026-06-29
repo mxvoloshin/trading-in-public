@@ -36,6 +36,22 @@ Start here before implementation work:
 
 - `docs/research/historical-market-data-source.md`
 
+## Market Data
+
+Prepare local historical bars for research:
+
+```sh
+uv run python -m trade_research_app market-data fetch \
+  --symbol SPY \
+  --timeframe 5Min \
+  --start 2025-06-28 \
+  --end 2026-06-27 \
+  --market XNYS \
+  --session regular
+```
+
+See `docs/market-data.md` for Alpaca credentials, local cache layout, and public safety rules.
+
 ## Python Workspace
 
 The trading system code lives in a `uv` workspace.
@@ -54,7 +70,7 @@ apps/
   reconcile/
 ```
 
-These folders are scaffolded as importable packages only. They should stay behavior-free until later implementation issues define market data, strategy, broker, backtesting, and reconciliation contracts.
+These folders are scaffolded as importable packages. Market data behavior starts in `packages/trade_data` and `apps/research`; strategy, broker, backtesting, and reconciliation contracts will be added by later implementation issues.
 
 Local market data, backtest outputs, credentials, broker exports, and other private artifacts must not be committed.
 
