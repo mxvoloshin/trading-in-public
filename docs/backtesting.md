@@ -283,6 +283,35 @@ filter by itself. It says the next implementable candidate should approximate
 `trend_up` conditions from information available early enough in the session,
 then compare against the same execution-cost stress.
 
+Cost-stress reports can be generated with:
+
+```sh
+uv run python -m trade_research_app backtest cost-stress \
+  --strategy spy-vwap-pullback \
+  --symbol SPY \
+  --timeframe 5Min \
+  --start 2025-06-28 \
+  --end 2026-06-27 \
+  --market XNYS \
+  --session regular
+```
+
+The first SPY baseline stress grid shows how quickly costs consume the gross
+edge:
+
+| Scenario | Total PnL | Expectancy / trade | Profit factor | Cost drag from gross | Gross edge consumed |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `gross` | `$2.3470` | `$0.0084424460` | `1.0140` | `$0.0000` | `0.00x` |
+| `commission_only` | `-$0.4330` | `-$0.0015575540` | `0.9974` | `$2.7800` | `1.18x` |
+| `slippage_0_25bps` | `-$7.1117377400` | `-$0.0255817904` | `0.9590` | `$9.4587377400` | `4.03x` |
+| `slippage_0_5bps` | `-$16.570475480` | `-$0.0596060269` | `0.9080` | `$18.917475480` | `8.06x` |
+| `slippage_1bps` | `-$35.48795096` | `-$0.1276544999` | `0.8164` | `$37.83495096` | `16.12x` |
+| `slippage_1bps_commission` | `-$38.26795096` | `-$0.1376544999` | `0.8039` | `$40.61495096` | `17.31x` |
+
+The stress report also carries the median same-session post-exit favorable move
+for each scenario. That keeps exit-quality context visible while comparing cost
+drag, but it still does not turn this baseline into a live candidate.
+
 Verdict: this first mechanical VWAP-pullback version is not live-ready. The
 gross edge is effectively flat before commissions, spread, slippage, missed
 fills, taxes, borrow/margin constraints, and operational risk. A one-share gross
@@ -310,13 +339,11 @@ strategy tuning:
 1. Add trade-level analytics: expectancy, median trade PnL, MAE/MFE, holding
    time, drawdown duration, contribution concentration, and daily return
    distribution.
-2. Add execution stress reporting: one-way slippage grids, commission scenarios,
-   gross edge consumed by costs, and adverse-selection checks after fills.
-3. Add robustness diagnostics: contribution concentration, chronological splits,
+2. Add robustness diagnostics: contribution concentration, chronological splits,
    and simple walk-forward summaries.
-4. Add event-day tagging for scheduled macro days before mixing those sessions
+3. Add event-day tagging for scheduled macro days before mixing those sessions
    into ordinary-session results.
-5. Implement the first narrowed candidate, `trend-day-vwap-reclaim`, through the
+4. Implement the first narrowed candidate, `trend-day-vwap-reclaim`, through the
    existing strategy registry so it can be compared against
    `spy-vwap-pullback` with identical execution semantics.
 

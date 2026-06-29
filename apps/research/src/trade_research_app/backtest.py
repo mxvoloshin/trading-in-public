@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -129,6 +129,69 @@ class BacktestCostModel:
         """Return the simulated commission for one fill."""
         variable_commission = quantity * self.commission_per_share
         return max(variable_commission, self.minimum_commission)
+
+
+@dataclass(frozen=True, slots=True)
+class CostStressScenario:
+    """One execution-cost scenario for repeated backtest stress runs."""
+
+    name: str
+    cost_model: BacktestCostModel
+
+
+@dataclass(frozen=True, slots=True)
+class CostStressRow:
+    """Compact result row for one execution-cost stress scenario."""
+
+    scenario_name: str
+    slippage_bps: Decimal
+    commission_per_share: Decimal
+    minimum_commission: Decimal
+    closed_trades: int
+    total_pnl: Decimal
+    expectancy_per_trade: Decimal
+    profit_factor: Decimal
+    total_execution_costs: Decimal
+    cost_drag_from_gross: Decimal
+    gross_edge_consumed: Decimal
+    median_post_exit_max_favorable_pnl: Decimal
+
+    def to_json_dict(self) -> dict[str, str | int]:
+        """Serialize the cost-stress row using JSON-safe primitives."""
+        return {
+            "scenario_name": self.scenario_name,
+            "slippage_bps": str(self.slippage_bps),
+            "commission_per_share": str(self.commission_per_share),
+            "minimum_commission": str(self.minimum_commission),
+            "closed_trades": self.closed_trades,
+            "total_pnl": str(self.total_pnl),
+            "expectancy_per_trade": str(self.expectancy_per_trade),
+            "profit_factor": str(self.profit_factor),
+            "total_execution_costs": str(self.total_execution_costs),
+            "cost_drag_from_gross": str(self.cost_drag_from_gross),
+            "gross_edge_consumed": str(self.gross_edge_consumed),
+            "median_post_exit_max_favorable_pnl": str(self.median_post_exit_max_favorable_pnl),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CostStressReport:
+    """Public-safe cost-stress report for one strategy/request pair."""
+
+    strategy_name: str
+    instrument_id: str
+    timeframe: str
+    rows: tuple[CostStressRow, ...]
+    output_path: Path | None
+
+    def to_json_dict(self) -> dict[str, str | list[dict[str, str | int]]]:
+        """Serialize the cost-stress report using JSON-safe primitives."""
+        return {
+            "strategy_name": self.strategy_name,
+            "instrument_id": self.instrument_id,
+            "timeframe": self.timeframe,
+            "rows": [row.to_json_dict() for row in self.rows],
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -508,6 +571,112 @@ def run_minimal_backtest(
             encoding="utf-8",
         )
     return summary
+
+
+def default_cost_stress_scenarios() -> tuple[CostStressScenario, ...]:
+    """Return the first standard execution-cost grid for strategy research."""
+    return (
+        CostStressScenario("gross", BacktestCostModel()),
+        CostStressScenario(
+            "commission_only",
+            BacktestCostModel(commission_per_share=Decimal("0.005")),
+        ),
+        CostStressScenario("slippage_0_25bps", BacktestCostModel(slippage_bps=Decimal("0.25"))),
+        CostStressScenario("slippage_0_5bps", BacktestCostModel(slippage_bps=Decimal("0.5"))),
+        CostStressScenario("slippage_1bps", BacktestCostModel(slippage_bps=Decimal("1"))),
+        CostStressScenario("slippage_2bps", BacktestCostModel(slippage_bps=Decimal("2"))),
+        CostStressScenario("slippage_3bps", BacktestCostModel(slippage_bps=Decimal("3"))),
+        CostStressScenario("slippage_5bps", BacktestCostModel(slippage_bps=Decimal("5"))),
+        CostStressScenario(
+            "slippage_1bps_commission",
+            BacktestCostModel(
+                slippage_bps=Decimal("1"),
+                commission_per_share=Decimal("0.005"),
+            ),
+        ),
+        CostStressScenario(
+            "slippage_1bps_commission_min_1",
+            BacktestCostModel(
+                slippage_bps=Decimal("1"),
+                commission_per_share=Decimal("0.005"),
+                minimum_commission=Decimal("1"),
+            ),
+        ),
+    )
+
+
+def run_cost_stress_report(
+    *,
+    request: HistoricalBarsRequest,
+    cache_dir: Path,
+    output_path: Path | None,
+    strategy_factory: Callable[[], Strategy],
+    quantity: Decimal = Decimal("1"),
+    scenarios: Sequence[CostStressScenario] | None = None,
+) -> CostStressReport:
+    """Run the same backtest over a grid of execution-cost assumptions."""
+    stress_scenarios = tuple(scenarios or default_cost_stress_scenarios())
+    scenario_summaries = [
+        (
+            scenario,
+            run_minimal_backtest(
+                request=request,
+                cache_dir=cache_dir,
+                output_path=None,
+                strategy=strategy_factory(),
+                quantity=quantity,
+                cost_model=scenario.cost_model,
+            ),
+        )
+        for scenario in stress_scenarios
+    ]
+    gross_total_pnl = scenario_summaries[0][1].total_pnl if scenario_summaries else Decimal("0")
+    rows = tuple(
+        _cost_stress_row(
+            scenario=scenario,
+            summary=summary,
+            gross_total_pnl=gross_total_pnl,
+        )
+        for scenario, summary in scenario_summaries
+    )
+    report = CostStressReport(
+        strategy_name=strategy_factory().name,
+        instrument_id=request.instrument.instrument_id,
+        timeframe=request.timeframe,
+        rows=rows,
+        output_path=output_path,
+    )
+    if output_path is not None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(
+            json.dumps(report.to_json_dict(), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    return report
+
+
+def _cost_stress_row(
+    *,
+    scenario: CostStressScenario,
+    summary: BacktestSummary,
+    gross_total_pnl: Decimal,
+) -> CostStressRow:
+    """Build one compact cost-stress row from a full backtest summary."""
+    cost_drag = gross_total_pnl - summary.total_pnl
+    return CostStressRow(
+        scenario_name=scenario.name,
+        slippage_bps=scenario.cost_model.slippage_bps,
+        commission_per_share=scenario.cost_model.commission_per_share,
+        minimum_commission=scenario.cost_model.minimum_commission,
+        closed_trades=summary.closed_trades,
+        total_pnl=summary.total_pnl,
+        expectancy_per_trade=summary.expectancy_per_trade,
+        profit_factor=summary.profit_factor,
+        total_execution_costs=summary.total_execution_costs,
+        cost_drag_from_gross=cost_drag,
+        gross_edge_consumed=(cost_drag / gross_total_pnl if gross_total_pnl > 0 else Decimal("0")),
+        median_post_exit_max_favorable_pnl=summary.median_post_exit_max_favorable_pnl,
+    )
 
 
 def _risk_outcome_for_action(action: DecisionAction, position: Decimal) -> RiskOutcome:
