@@ -36,6 +36,7 @@ Start here before implementation work:
 
 - `docs/research/historical-market-data-source.md`
 - `docs/research/ibkr-api-shape.md`
+- `docs/research/shared-core-boundary.md`
 
 ## Market Data
 
