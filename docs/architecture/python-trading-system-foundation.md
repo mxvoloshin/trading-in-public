@@ -55,13 +55,10 @@ Owns generic concepts such as:
 - market sessions and calendars as abstractions
 - signals
 - strategy decisions
+- risk decisions
 - order intents
-- orders
-- fills
-- positions
-- portfolio state
 - risk inputs
-- identifiers used across decision, order, fill, and reconciliation flows
+- identifiers used across decision, risk, intent, execution, and reconciliation flows
 - common configuration schemas that are not broker-, market-, or strategy-specific
 
 Must not depend on:
@@ -72,6 +69,8 @@ Must not depend on:
 - one strategy
 - one backtesting engine
 - one live execution app
+
+Do not make `trade_core` a fully shared order lifecycle model too early. The current shared-boundary decision is documented in `docs/research/shared-core-boundary.md`: core should share decisions, risk decisions, order intents, and traceability IDs first, while simulated orders/fills and broker orders/executions remain mode-specific until later implementation issues prove the right contracts.
 
 ### `trade_strategies`
 
