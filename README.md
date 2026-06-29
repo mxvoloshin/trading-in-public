@@ -35,6 +35,7 @@ Start here before implementation work:
 ## Research Decisions
 
 - `docs/research/historical-market-data-source.md`
+- `docs/research/ibkr-api-shape.md`
 
 ## Market Data
 
