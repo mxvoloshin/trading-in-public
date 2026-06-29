@@ -13,7 +13,11 @@ from trade_data.sessions import get_market_session_config
 from trade_data.store import LocalMarketDataStore
 from trade_strategies import get_strategy, list_strategy_names
 
-from trade_research_app.backtest import BacktestCostModel, run_minimal_backtest
+from trade_research_app.backtest import (
+    BacktestCostModel,
+    run_cost_stress_report,
+    run_minimal_backtest,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -67,6 +71,21 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("--minimum-commission", default="0")
     run.add_argument("--output", default=None)
     run.set_defaults(handler=_handle_backtest_run)
+
+    cost_stress = backtest_subcommands.add_parser("cost-stress")
+    cost_stress.add_argument("--strategy", default="close-momentum", choices=list_strategy_names())
+    cost_stress.add_argument("--symbol", required=True)
+    cost_stress.add_argument("--timeframe", default="5Min")
+    cost_stress.add_argument(
+        "--start", required=True, help="inclusive market-local date, YYYY-MM-DD"
+    )
+    cost_stress.add_argument("--end", required=True, help="inclusive market-local date, YYYY-MM-DD")
+    cost_stress.add_argument("--market", default="XNYS")
+    cost_stress.add_argument("--session", default="regular", choices=["regular", "extended", "all"])
+    cost_stress.add_argument("--cache-dir", default=".data")
+    cost_stress.add_argument("--quantity", default="1")
+    cost_stress.add_argument("--output", default=None)
+    cost_stress.set_defaults(handler=_handle_backtest_cost_stress)
 
     return parser
 
@@ -176,6 +195,49 @@ def _handle_backtest_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_backtest_cost_stress(args: argparse.Namespace) -> int:
+    """Run a selected strategy across the standard execution-cost grid."""
+    request = _historical_bars_request_from_args(args)
+    output_path = (
+        Path(str(args.output))
+        if args.output is not None
+        else _default_cost_stress_output_path(
+            cache_dir=Path(str(args.cache_dir)),
+            request=request,
+            strategy_name=str(args.strategy),
+        )
+    )
+    report = run_cost_stress_report(
+        request=request,
+        cache_dir=Path(str(args.cache_dir)),
+        output_path=output_path,
+        strategy_factory=lambda: get_strategy(str(args.strategy)),
+        quantity=Decimal(str(args.quantity)),
+    )
+
+    print(f"strategy={report.strategy_name}")
+    print(f"instrument_id={report.instrument_id}")
+    print(f"timeframe={report.timeframe}")
+    for row in report.rows:
+        print(
+            "scenario="
+            f"{row.scenario_name} "
+            f"slippage_bps={row.slippage_bps} "
+            f"commission_per_share={row.commission_per_share} "
+            f"minimum_commission={row.minimum_commission} "
+            f"total_pnl={row.total_pnl} "
+            f"expectancy_per_trade={row.expectancy_per_trade} "
+            f"profit_factor={row.profit_factor} "
+            f"total_execution_costs={row.total_execution_costs} "
+            f"cost_drag_from_gross={row.cost_drag_from_gross} "
+            f"gross_edge_consumed={row.gross_edge_consumed} "
+            f"median_post_exit_max_favorable_pnl={row.median_post_exit_max_favorable_pnl}"
+        )
+    if report.output_path is not None:
+        print(f"output={report.output_path}")
+    return 0
+
+
 def _historical_bars_request_from_args(args: argparse.Namespace) -> HistoricalBarsRequest:
     """Convert CLI args into the provider-neutral historical bars request."""
     session_config = get_market_session_config(str(args.market))
@@ -211,6 +273,19 @@ def _default_backtest_output_path(
     end = request.end_utc.strftime("%Y%m%dT%H%M%SZ")
     filename = f"{request.instrument.instrument_id}_{request.timeframe}_{start}_{end}.json"
     return cache_dir / "backtests" / "minimal" / strategy_name / filename
+
+
+def _default_cost_stress_output_path(
+    *,
+    cache_dir: Path,
+    request: HistoricalBarsRequest,
+    strategy_name: str,
+) -> Path:
+    """Return the default gitignored cost-stress report path."""
+    start = request.start_utc.strftime("%Y%m%dT%H%M%SZ")
+    end = request.end_utc.strftime("%Y%m%dT%H%M%SZ")
+    filename = f"{request.instrument.instrument_id}_{request.timeframe}_{start}_{end}.json"
+    return cache_dir / "backtests" / "cost-stress" / strategy_name / filename
 
 
 def inclusive_local_dates_to_utc_range(

@@ -10,6 +10,8 @@ from trade_data import Bar, HistoricalBarsRequest, Instrument, LocalMarketDataSt
 from trade_data.sessions import MarketSessionConfig
 from trade_research_app.backtest import (
     BacktestCostModel,
+    default_cost_stress_scenarios,
+    run_cost_stress_report,
     run_minimal_backtest,
     session_regime_tags,
 )
@@ -152,6 +154,101 @@ def test_backtest_cli_runs_against_local_cache(
     assert "average_post_exit_max_favorable_pnl=0.0" in output
     assert "median_post_exit_max_favorable_pnl=0.0" in output
     assert "max_post_exit_max_favorable_pnl=0.0" in output
+
+
+def test_default_cost_stress_scenarios_cover_slippage_and_commissions() -> None:
+    scenarios = default_cost_stress_scenarios()
+
+    assert [scenario.name for scenario in scenarios] == [
+        "gross",
+        "commission_only",
+        "slippage_0_25bps",
+        "slippage_0_5bps",
+        "slippage_1bps",
+        "slippage_2bps",
+        "slippage_3bps",
+        "slippage_5bps",
+        "slippage_1bps_commission",
+        "slippage_1bps_commission_min_1",
+    ]
+    assert scenarios[4].cost_model.slippage_bps == Decimal("1")
+    assert scenarios[8].cost_model.commission_per_share == Decimal("0.005")
+    assert scenarios[9].cost_model.minimum_commission == Decimal("1")
+
+
+def test_cost_stress_report_writes_compact_scenario_rows(tmp_path: Path) -> None:
+    request = _request()
+    _save_sample_bars(tmp_path, request)
+    output_path = tmp_path / "cost-stress.json"
+
+    report = run_cost_stress_report(
+        request=request,
+        cache_dir=tmp_path,
+        output_path=output_path,
+        strategy_factory=lambda: get_strategy("close-momentum"),
+        quantity=Decimal("1"),
+        scenarios=default_cost_stress_scenarios()[:2],
+    )
+
+    assert report.rows[0].scenario_name == "gross"
+    assert report.rows[0].total_pnl == Decimal("-1.0")
+    assert report.rows[0].cost_drag_from_gross == Decimal("0.0")
+    assert report.rows[1].scenario_name == "commission_only"
+    assert report.rows[1].total_pnl == Decimal("-1.010")
+    assert report.rows[1].cost_drag_from_gross == Decimal("0.010")
+    assert json.loads(output_path.read_text(encoding="utf-8"))["rows"][1] == {
+        "closed_trades": 1,
+        "commission_per_share": "0.005",
+        "cost_drag_from_gross": "0.010",
+        "expectancy_per_trade": "-1.010",
+        "gross_edge_consumed": "0",
+        "median_post_exit_max_favorable_pnl": "0.0",
+        "minimum_commission": "0",
+        "profit_factor": "0",
+        "scenario_name": "commission_only",
+        "slippage_bps": "0",
+        "total_execution_costs": "0.010",
+        "total_pnl": "-1.010",
+    }
+
+
+def test_backtest_cost_stress_cli_runs_against_local_cache(
+    tmp_path: Path,
+    capsys: CaptureFixture[str],
+) -> None:
+    request = _request()
+    _save_sample_bars(tmp_path, request)
+    output_path = tmp_path / "stress.json"
+
+    exit_code = main(
+        [
+            "backtest",
+            "cost-stress",
+            "--symbol",
+            "SPY",
+            "--strategy",
+            "close-momentum",
+            "--timeframe",
+            "5Min",
+            "--start",
+            "2026-06-26",
+            "--end",
+            "2026-06-26",
+            "--cache-dir",
+            str(tmp_path),
+            "--output",
+            str(output_path),
+        ]
+    )
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "strategy=close-momentum" in output
+    assert "scenario=gross" in output
+    assert "scenario=slippage_1bps_commission" in output
+    assert "cost_drag_from_gross=0.010" in output
+    assert "median_post_exit_max_favorable_pnl=0.0" in output
+    assert output_path.exists()
 
 
 def test_minimal_backtest_applies_commission_costs(tmp_path: Path) -> None:
