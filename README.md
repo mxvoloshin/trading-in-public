@@ -28,6 +28,7 @@ uv run pyright
 Start here before implementation work:
 
 - `AGENTS.md`
+- `docs/core-domain-contracts.md`
 - `docs/architecture/python-trading-system-foundation.md`
 - `docs/architecture/service-map.md`
 - `docs/architecture/implementation-principles.md`
