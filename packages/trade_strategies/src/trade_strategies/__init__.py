@@ -3,12 +3,14 @@
 from trade_strategies.close_momentum import CloseMomentumStrategy
 from trade_strategies.protocols import Strategy, StrategyDecisionContext
 from trade_strategies.registry import get_strategy, list_strategy_names
+from trade_strategies.spy_vwap_pullback import SpyVwapPullbackStrategy
 
 PACKAGE_NAME = "trade_strategies"
 
 __all__ = [
     "CloseMomentumStrategy",
     "PACKAGE_NAME",
+    "SpyVwapPullbackStrategy",
     "Strategy",
     "StrategyDecisionContext",
     "get_strategy",

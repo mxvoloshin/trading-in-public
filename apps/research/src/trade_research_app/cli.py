@@ -13,7 +13,7 @@ from trade_data.sessions import get_market_session_config
 from trade_data.store import LocalMarketDataStore
 from trade_strategies import get_strategy, list_strategy_names
 
-from trade_research_app.backtest import run_minimal_backtest
+from trade_research_app.backtest import BacktestCostModel, run_minimal_backtest
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -62,6 +62,9 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("--session", default="regular", choices=["regular", "extended", "all"])
     run.add_argument("--cache-dir", default=".data")
     run.add_argument("--quantity", default="1")
+    run.add_argument("--slippage-bps", default="0")
+    run.add_argument("--commission-per-share", default="0")
+    run.add_argument("--minimum-commission", default="0")
     run.add_argument("--output", default=None)
     run.set_defaults(handler=_handle_backtest_run)
 
@@ -124,6 +127,11 @@ def _handle_backtest_run(args: argparse.Namespace) -> int:
         output_path=output_path,
         strategy=get_strategy(str(args.strategy)),
         quantity=Decimal(str(args.quantity)),
+        cost_model=BacktestCostModel(
+            slippage_bps=Decimal(str(args.slippage_bps)),
+            commission_per_share=Decimal(str(args.commission_per_share)),
+            minimum_commission=Decimal(str(args.minimum_commission)),
+        ),
     )
 
     print(f"strategy={summary.strategy_name}")
@@ -136,6 +144,18 @@ def _handle_backtest_run(args: argparse.Namespace) -> int:
     print(f"realized_pnl={summary.realized_pnl}")
     print(f"unrealized_pnl={summary.unrealized_pnl}")
     print(f"total_pnl={summary.total_pnl}")
+    print(f"slippage_bps={summary.slippage_bps}")
+    print(f"commission_per_share={summary.commission_per_share}")
+    print(f"minimum_commission={summary.minimum_commission}")
+    print(f"total_commissions={summary.total_commissions}")
+    print(f"closed_trades={summary.closed_trades}")
+    print(f"winning_trades={summary.winning_trades}")
+    print(f"losing_trades={summary.losing_trades}")
+    print(f"win_rate={summary.win_rate}")
+    print(f"average_win={summary.average_win}")
+    print(f"average_loss={summary.average_loss}")
+    print(f"profit_factor={summary.profit_factor}")
+    print(f"max_drawdown={summary.max_drawdown}")
     if summary.output_path is not None:
         print(f"output={summary.output_path}")
     return 0

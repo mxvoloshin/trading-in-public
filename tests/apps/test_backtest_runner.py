@@ -8,7 +8,7 @@ from pathlib import Path
 from pytest import CaptureFixture
 from trade_data import Bar, HistoricalBarsRequest, Instrument, LocalMarketDataStore
 from trade_data.sessions import MarketSessionConfig
-from trade_research_app.backtest import run_minimal_backtest
+from trade_research_app.backtest import BacktestCostModel, run_minimal_backtest
 from trade_research_app.cli import main
 from trade_strategies import get_strategy
 
@@ -37,17 +37,29 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
     assert summary.total_pnl == Decimal("-1.0")
     assert json.loads(output_path.read_text(encoding="utf-8")) == {
         "approved_orders": 2,
+        "average_loss": "-1.0",
+        "average_win": "0",
         "bars_loaded": 5,
+        "closed_trades": 1,
         "decisions": 5,
         "ending_position": "0",
         "fills": 2,
         "instrument_id": "SPY.US",
+        "losing_trades": 1,
+        "max_drawdown": "-1.0",
+        "minimum_commission": "0",
         "pending_orders": 0,
+        "profit_factor": "0",
         "realized_pnl": "-1.0",
+        "commission_per_share": "0",
+        "slippage_bps": "0",
         "strategy_name": "close-momentum",
         "timeframe": "5Min",
+        "total_commissions": "0",
         "total_pnl": "-1.0",
         "unrealized_pnl": "0",
+        "win_rate": "0",
+        "winning_trades": 0,
     }
 
 
@@ -87,6 +99,49 @@ def test_backtest_cli_runs_against_local_cache(
     assert "pending_orders=0" in output
     assert "realized_pnl=-1.0" in output
     assert "total_pnl=-1.0" in output
+    assert "slippage_bps=0" in output
+    assert "total_commissions=0" in output
+    assert "closed_trades=1" in output
+    assert "profit_factor=0" in output
+
+
+def test_minimal_backtest_applies_commission_costs(tmp_path: Path) -> None:
+    request = _request()
+    _save_sample_bars(tmp_path, request)
+
+    summary = run_minimal_backtest(
+        request=request,
+        cache_dir=tmp_path,
+        output_path=None,
+        strategy=get_strategy("close-momentum"),
+        quantity=Decimal("1"),
+        cost_model=BacktestCostModel(commission_per_share=Decimal("0.10")),
+    )
+
+    assert summary.fills == 2
+    assert summary.total_commissions == Decimal("0.20")
+    assert summary.realized_pnl == Decimal("-1.20")
+    assert summary.total_pnl == Decimal("-1.20")
+    assert summary.average_loss == Decimal("-1.20")
+    assert summary.max_drawdown == Decimal("-1.20")
+
+
+def test_minimal_backtest_applies_one_way_slippage(tmp_path: Path) -> None:
+    request = _request()
+    _save_sample_bars(tmp_path, request)
+
+    summary = run_minimal_backtest(
+        request=request,
+        cache_dir=tmp_path,
+        output_path=None,
+        strategy=get_strategy("close-momentum"),
+        quantity=Decimal("1"),
+        cost_model=BacktestCostModel(slippage_bps=Decimal("100")),
+    )
+
+    assert summary.fills == 2
+    assert summary.realized_pnl == Decimal("-3.020")
+    assert summary.total_pnl == Decimal("-3.020")
 
 
 def _request() -> HistoricalBarsRequest:

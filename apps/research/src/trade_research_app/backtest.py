@@ -35,7 +35,8 @@ class SimulatedFill:
         filled_at_utc: UTC timestamp of the simulated fill.
         side: Buy or sell side from the broker-neutral order intent.
         quantity: Simulated filled quantity.
-        price: Simulated fill price from normalized market data.
+        price: Simulated fill price after the configured slippage model.
+        commission: Simulated commission charged for this fill.
     """
 
     order_intent_id: OrderIntentId
@@ -43,6 +44,45 @@ class SimulatedFill:
     side: OrderSide
     quantity: Decimal
     price: Decimal
+    commission: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class BacktestCostModel:
+    """Simple execution-cost assumptions applied by the backtest runner.
+
+    Parameters:
+        slippage_bps: One-way slippage in basis points. Buy fills are adjusted
+            upward and sell fills are adjusted downward.
+        commission_per_share: Variable commission charged per simulated share.
+        minimum_commission: Minimum commission charged per fill.
+    """
+
+    slippage_bps: Decimal = Decimal("0")
+    commission_per_share: Decimal = Decimal("0")
+    minimum_commission: Decimal = Decimal("0")
+
+    def __post_init__(self) -> None:
+        for label, value in (
+            ("slippage_bps", self.slippage_bps),
+            ("commission_per_share", self.commission_per_share),
+            ("minimum_commission", self.minimum_commission),
+        ):
+            if value < 0:
+                msg = f"{label} must be greater than or equal to zero"
+                raise ValueError(msg)
+
+    def fill_price(self, *, side: OrderSide, reference_price: Decimal) -> Decimal:
+        """Apply one-way slippage to a reference market price."""
+        slippage_multiplier = self.slippage_bps / Decimal("10000")
+        if side == OrderSide.BUY:
+            return reference_price * (Decimal("1") + slippage_multiplier)
+        return reference_price * (Decimal("1") - slippage_multiplier)
+
+    def commission(self, *, quantity: Decimal) -> Decimal:
+        """Return the simulated commission for one fill."""
+        variable_commission = quantity * self.commission_per_share
+        return max(variable_commission, self.minimum_commission)
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +106,18 @@ class BacktestSummary:
     realized_pnl: Decimal
     unrealized_pnl: Decimal
     total_pnl: Decimal
+    slippage_bps: Decimal
+    commission_per_share: Decimal
+    minimum_commission: Decimal
+    total_commissions: Decimal
+    closed_trades: int
+    winning_trades: int
+    losing_trades: int
+    win_rate: Decimal
+    average_win: Decimal
+    average_loss: Decimal
+    profit_factor: Decimal
+    max_drawdown: Decimal
     output_path: Path | None
 
     def to_json_dict(self) -> dict[str, str | int]:
@@ -83,6 +135,18 @@ class BacktestSummary:
             "realized_pnl": str(self.realized_pnl),
             "unrealized_pnl": str(self.unrealized_pnl),
             "total_pnl": str(self.total_pnl),
+            "slippage_bps": str(self.slippage_bps),
+            "commission_per_share": str(self.commission_per_share),
+            "minimum_commission": str(self.minimum_commission),
+            "total_commissions": str(self.total_commissions),
+            "closed_trades": self.closed_trades,
+            "winning_trades": self.winning_trades,
+            "losing_trades": self.losing_trades,
+            "win_rate": str(self.win_rate),
+            "average_win": str(self.average_win),
+            "average_loss": str(self.average_loss),
+            "profit_factor": str(self.profit_factor),
+            "max_drawdown": str(self.max_drawdown),
         }
 
 
@@ -93,6 +157,7 @@ def run_minimal_backtest(
     output_path: Path | None,
     strategy: Strategy,
     quantity: Decimal = Decimal("1"),
+    cost_model: BacktestCostModel | None = None,
 ) -> BacktestSummary:
     """Load normalized bars, run one strategy, and write a public-safe summary.
 
@@ -104,10 +169,12 @@ def run_minimal_backtest(
         strategy: Selected strategy adapter. The runner does not import concrete
             strategy implementations.
         quantity: Fixed quantity per approved order intent for this first runner.
+        cost_model: Execution-cost assumptions applied to simulated fills.
 
     Returns:
         A deterministic summary suitable for tests and local engineering review.
     """
+    cost_model = cost_model or BacktestCostModel()
     session_config = get_market_session_config(request.market)
     store = LocalMarketDataStore(cache_dir)
     bars = store.load_bars(request, session_config)
@@ -122,9 +189,12 @@ def run_minimal_backtest(
     position = Decimal("0")
     average_entry_price = Decimal("0")
     realized_pnl = Decimal("0")
+    total_commissions = Decimal("0")
+    open_trade_commissions = Decimal("0")
     decisions = 0
     risk_decisions: list[RiskDecision] = []
     fills: list[SimulatedFill] = []
+    closed_trade_pnls: list[Decimal] = []
     pending_order_intent: OrderIntent | None = None
 
     for sequence_number, bar in enumerate(bars, start=1):
@@ -135,14 +205,29 @@ def run_minimal_backtest(
             fill = _simulate_next_open_fill(
                 order_intent=pending_order_intent,
                 filled_at_utc=bar.timestamp_utc,
-                price=Decimal(str(bar.open)),
+                reference_price=Decimal(str(bar.open)),
+                cost_model=cost_model,
             )
             fills.append(fill)
+            total_commissions += fill.commission
+            trade_pnl = _closed_trade_pnl(
+                fill=fill,
+                position=position,
+                average_entry_price=average_entry_price,
+                open_trade_commissions=open_trade_commissions,
+            )
             position, average_entry_price, realized_pnl = _apply_fill(
                 fill=fill,
                 position=position,
                 average_entry_price=average_entry_price,
                 realized_pnl=realized_pnl,
+            )
+            if trade_pnl is not None:
+                closed_trade_pnls.append(trade_pnl)
+            open_trade_commissions = (
+                open_trade_commissions + fill.commission
+                if fill.side == OrderSide.BUY
+                else Decimal("0")
             )
             pending_order_intent = None
 
@@ -211,6 +296,7 @@ def run_minimal_backtest(
         average_entry_price=average_entry_price,
         last_close=Decimal(str(bars[-1].close)) if bars else Decimal("0"),
     )
+    trade_metrics = _trade_metrics(closed_trade_pnls)
     summary = BacktestSummary(
         strategy_name=strategy.name,
         instrument_id=request.instrument.instrument_id,
@@ -224,6 +310,18 @@ def run_minimal_backtest(
         realized_pnl=realized_pnl,
         unrealized_pnl=unrealized_pnl,
         total_pnl=realized_pnl + unrealized_pnl,
+        slippage_bps=cost_model.slippage_bps,
+        commission_per_share=cost_model.commission_per_share,
+        minimum_commission=cost_model.minimum_commission,
+        total_commissions=total_commissions,
+        closed_trades=trade_metrics.closed_trades,
+        winning_trades=trade_metrics.winning_trades,
+        losing_trades=trade_metrics.losing_trades,
+        win_rate=trade_metrics.win_rate,
+        average_win=trade_metrics.average_win,
+        average_loss=trade_metrics.average_loss,
+        profit_factor=trade_metrics.profit_factor,
+        max_drawdown=trade_metrics.max_drawdown,
         output_path=output_path,
     )
     if output_path is not None:
@@ -253,21 +351,27 @@ def _simulate_next_open_fill(
     *,
     order_intent: OrderIntent,
     filled_at_utc: datetime,
-    price: Decimal,
+    reference_price: Decimal,
+    cost_model: BacktestCostModel,
 ) -> SimulatedFill:
     """Create a deterministic simulated fill at the next bar open.
 
     Parameters:
         order_intent: Approved broker-neutral order intent waiting to fill.
         filled_at_utc: Timestamp of the next normalized bar open.
-        price: Open price from that same normalized bar.
+        reference_price: Open price from that same normalized bar.
+        cost_model: Slippage and commission assumptions for the fill.
     """
     return SimulatedFill(
         order_intent_id=order_intent.order_intent_id,
         filled_at_utc=filled_at_utc.astimezone(UTC),
         side=order_intent.side,
         quantity=order_intent.quantity,
-        price=price,
+        price=cost_model.fill_price(
+            side=order_intent.side,
+            reference_price=reference_price,
+        ),
+        commission=cost_model.commission(quantity=order_intent.quantity),
     )
 
 
@@ -290,12 +394,31 @@ def _apply_fill(
     # The first runner supports one long unit at a time. That keeps simulated
     # execution obvious while proving the decision -> intent -> fill chain.
     if fill.side == OrderSide.BUY:
-        return position + fill.quantity, fill.price, realized_pnl
+        return position + fill.quantity, fill.price, realized_pnl - fill.commission
 
     new_position = position - fill.quantity
-    new_realized_pnl = realized_pnl + (fill.price - average_entry_price) * fill.quantity
+    new_realized_pnl = (
+        realized_pnl + (fill.price - average_entry_price) * fill.quantity - fill.commission
+    )
     new_average_entry_price = Decimal("0") if new_position == 0 else average_entry_price
     return new_position, new_average_entry_price, new_realized_pnl
+
+
+def _closed_trade_pnl(
+    *,
+    fill: SimulatedFill,
+    position: Decimal,
+    average_entry_price: Decimal,
+    open_trade_commissions: Decimal,
+) -> Decimal | None:
+    """Return realized trade PnL when a fill closes a simple long position."""
+    if fill.side != OrderSide.SELL or position <= 0:
+        return None
+    return (
+        (fill.price - average_entry_price) * fill.quantity
+        - open_trade_commissions
+        - fill.commission
+    )
 
 
 def _mark_to_market_pnl(
@@ -308,6 +431,60 @@ def _mark_to_market_pnl(
     if position == 0:
         return Decimal("0")
     return (last_close - average_entry_price) * position
+
+
+@dataclass(frozen=True, slots=True)
+class _TradeMetrics:
+    """Completed-trade quality metrics for the public-safe summary."""
+
+    closed_trades: int
+    winning_trades: int
+    losing_trades: int
+    win_rate: Decimal
+    average_win: Decimal
+    average_loss: Decimal
+    profit_factor: Decimal
+    max_drawdown: Decimal
+
+
+def _trade_metrics(closed_trade_pnls: list[Decimal]) -> _TradeMetrics:
+    """Calculate simple distribution metrics from completed trade PnL values."""
+    winning_pnls = [pnl for pnl in closed_trade_pnls if pnl > 0]
+    losing_pnls = [pnl for pnl in closed_trade_pnls if pnl < 0]
+    gross_profit = sum(winning_pnls, Decimal("0"))
+    gross_loss = abs(sum(losing_pnls, Decimal("0")))
+    closed_trades = len(closed_trade_pnls)
+
+    return _TradeMetrics(
+        closed_trades=closed_trades,
+        winning_trades=len(winning_pnls),
+        losing_trades=len(losing_pnls),
+        win_rate=(
+            Decimal(len(winning_pnls)) / Decimal(closed_trades) if closed_trades else Decimal("0")
+        ),
+        average_win=(gross_profit / Decimal(len(winning_pnls)) if winning_pnls else Decimal("0")),
+        average_loss=(
+            sum(losing_pnls, Decimal("0")) / Decimal(len(losing_pnls))
+            if losing_pnls
+            else Decimal("0")
+        ),
+        profit_factor=(
+            gross_profit / gross_loss if gross_profit > 0 and gross_loss > 0 else Decimal("0")
+        ),
+        max_drawdown=_max_drawdown(closed_trade_pnls),
+    )
+
+
+def _max_drawdown(closed_trade_pnls: list[Decimal]) -> Decimal:
+    """Calculate max realized drawdown from the closed-trade equity curve."""
+    equity = Decimal("0")
+    peak = Decimal("0")
+    max_drawdown = Decimal("0")
+    for trade_pnl in closed_trade_pnls:
+        equity += trade_pnl
+        peak = max(peak, equity)
+        max_drawdown = min(max_drawdown, equity - peak)
+    return max_drawdown
 
 
 def _bar_close_time(timeframe: str, timestamp_utc: datetime) -> datetime:
