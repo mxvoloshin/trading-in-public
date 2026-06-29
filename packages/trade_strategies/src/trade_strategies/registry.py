@@ -6,11 +6,13 @@ from collections.abc import Callable
 
 from trade_strategies.close_momentum import CloseMomentumStrategy
 from trade_strategies.protocols import Strategy
+from trade_strategies.spy_vwap_pullback import SpyVwapPullbackStrategy
 
 StrategyFactory = Callable[[], Strategy]
 
 _STRATEGIES: dict[str, StrategyFactory] = {
     CloseMomentumStrategy.name: CloseMomentumStrategy,
+    SpyVwapPullbackStrategy.name: SpyVwapPullbackStrategy,
 }
 
 
