@@ -40,13 +40,29 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
         "average_loss": "-1.0",
         "average_win": "0",
         "bars_loaded": 5,
+        "best_trade_pnl": "-1.0",
         "closed_trades": 1,
+        "cost_per_closed_trade": "0.0",
+        "daily_breakdown": {
+            "2026-06-26": {
+                "closed_trades": 1,
+                "expectancy": "-1.0",
+                "losing_trades": 1,
+                "total_pnl": "-1.0",
+                "win_rate": "0",
+                "winning_trades": 0,
+            },
+        },
         "decisions": 5,
         "ending_position": "0",
+        "expectancy_per_day": "-1.0",
+        "expectancy_per_trade": "-1.0",
         "fills": 2,
         "instrument_id": "SPY.US",
         "losing_trades": 1,
         "max_drawdown": "-1.0",
+        "max_drawdown_duration_trades": 1,
+        "median_trade_pnl": "-1.0",
         "minimum_commission": "0",
         "pending_orders": 0,
         "profit_factor": "0",
@@ -56,10 +72,23 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
         "strategy_name": "close-momentum",
         "timeframe": "5Min",
         "total_commissions": "0",
+        "total_execution_costs": "0.0",
+        "total_slippage_cost": "0.0",
         "total_pnl": "-1.0",
+        "time_of_day_breakdown": {
+            "09:30-10:00": {
+                "closed_trades": 1,
+                "expectancy": "-1.0",
+                "losing_trades": 1,
+                "total_pnl": "-1.0",
+                "win_rate": "0",
+                "winning_trades": 0,
+            },
+        },
         "unrealized_pnl": "0",
         "win_rate": "0",
         "winning_trades": 0,
+        "worst_trade_pnl": "-1.0",
     }
 
 
@@ -101,6 +130,9 @@ def test_backtest_cli_runs_against_local_cache(
     assert "total_pnl=-1.0" in output
     assert "slippage_bps=0" in output
     assert "total_commissions=0" in output
+    assert "total_slippage_cost=0.0" in output
+    assert "expectancy_per_trade=-1.0" in output
+    assert "median_trade_pnl=-1.0" in output
     assert "closed_trades=1" in output
     assert "profit_factor=0" in output
 
@@ -120,8 +152,11 @@ def test_minimal_backtest_applies_commission_costs(tmp_path: Path) -> None:
 
     assert summary.fills == 2
     assert summary.total_commissions == Decimal("0.20")
+    assert summary.total_execution_costs == Decimal("0.20")
+    assert summary.cost_per_closed_trade == Decimal("0.20")
     assert summary.realized_pnl == Decimal("-1.20")
     assert summary.total_pnl == Decimal("-1.20")
+    assert summary.expectancy_per_trade == Decimal("-1.20")
     assert summary.average_loss == Decimal("-1.20")
     assert summary.max_drawdown == Decimal("-1.20")
 
@@ -140,8 +175,48 @@ def test_minimal_backtest_applies_one_way_slippage(tmp_path: Path) -> None:
     )
 
     assert summary.fills == 2
+    assert summary.total_slippage_cost == Decimal("2.020")
+    assert summary.total_execution_costs == Decimal("2.020")
     assert summary.realized_pnl == Decimal("-3.020")
     assert summary.total_pnl == Decimal("-3.020")
+
+
+def test_minimal_backtest_reports_trade_breakdowns(tmp_path: Path) -> None:
+    request = _request()
+    _save_sample_bars(tmp_path, request)
+
+    summary = run_minimal_backtest(
+        request=request,
+        cache_dir=tmp_path,
+        output_path=None,
+        strategy=get_strategy("close-momentum"),
+        quantity=Decimal("1"),
+    )
+
+    assert summary.expectancy_per_day == Decimal("-1.0")
+    assert summary.best_trade_pnl == Decimal("-1.0")
+    assert summary.worst_trade_pnl == Decimal("-1.0")
+    assert summary.max_drawdown_duration_trades == 1
+    assert summary.daily_breakdown == {
+        "2026-06-26": {
+            "closed_trades": 1,
+            "expectancy": "-1.0",
+            "losing_trades": 1,
+            "total_pnl": "-1.0",
+            "win_rate": "0",
+            "winning_trades": 0,
+        },
+    }
+    assert summary.time_of_day_breakdown == {
+        "09:30-10:00": {
+            "closed_trades": 1,
+            "expectancy": "-1.0",
+            "losing_trades": 1,
+            "total_pnl": "-1.0",
+            "win_rate": "0",
+            "winning_trades": 0,
+        },
+    }
 
 
 def _request() -> HistoricalBarsRequest:

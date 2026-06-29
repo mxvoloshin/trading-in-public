@@ -96,6 +96,15 @@ data range ends with an open position or an approved order that has no next bar,
 the output shows `ending_position`, `pending_orders`, `realized_pnl`,
 `unrealized_pnl`, and `total_pnl` separately.
 
+The JSON summary also includes research diagnostics for completed trades:
+
+- expectancy per trade and per market-local exit day
+- median, best, and worst completed trade PnL
+- max drawdown duration measured in completed trades
+- total slippage cost, total commission, and total execution cost
+- daily completed-trade breakdowns
+- 30-minute market-local time-of-day breakdowns
+
 ## SPY VWAP Pullback Candidate
 
 The live-candidate research strategy is available as `spy-vwap-pullback`:
@@ -161,10 +170,16 @@ Backtest summary:
 | Average win | `$1.9252` |
 | Average loss | `-$0.8793` |
 | Profit factor | `1.0140` |
+| Expectancy / trade | `$0.0084424460` |
+| Expectancy / day | `$0.0131853933` |
+| Median trade PnL | `-$0.48` |
+| Best trade PnL | `$10.41` |
+| Worst trade PnL | `-$3.86` |
 | Realized PnL | `$2.3470` |
 | Unrealized PnL | `$0` |
 | Total PnL | `$2.3470` |
 | Max realized drawdown | `-$18.2102` |
+| Max drawdown duration | `157` completed trades |
 | Ending position | `0` |
 
 Mild cost scenario:
@@ -195,22 +210,38 @@ uv run python -m trade_research_app backtest run \
 | Average win | `$1.8906` |
 | Average loss | `-$1.0010` |
 | Profit factor | `0.8039` |
+| Expectancy / trade | `-$0.1376544999` |
+| Expectancy / day | `-$0.2149884885` |
+| Median trade PnL | `-$0.6295165` |
+| Best trade PnL | `$10.265437` |
+| Worst trade PnL | `-$4.004212` |
 | Realized PnL | `-$38.26795096` |
 | Total PnL | `-$38.26795096` |
+| Total slippage cost | `$37.83495096` |
+| Total execution costs | `$40.61495096` |
+| Cost / closed trade | `$0.1460969459` |
 | Max realized drawdown | `-$40.94114950` |
+| Max drawdown duration | `265` completed trades |
+
+The first time-of-day breakdown shows a useful diagnostic, not a tradable rule:
+most intraday exit buckets lose money after costs, while `15:30-16:00` is
+positive because many winners are forced flat near the end of the day. That
+suggests the next research slice should examine hold time, exit timing, and
+whether early exits are cutting trend-day winners too soon.
 
 Verdict: this first mechanical VWAP-pullback version is not live-ready. The
 gross edge is effectively flat before commissions, spread, slippage, missed
 fills, taxes, borrow/margin constraints, and operational risk. A one-share gross
 profit of `$2.3470` over `278` completed trades is about `$0.0084` per completed
 trade. Even a mild cost scenario with `1` bp one-way slippage and `$0.005/share`
-commission turns the result into a `-$38.26795096` loss.
+commission turns the result into a `-$38.26795096` loss. The measured execution
+cost of about `$0.1461` per completed trade is far larger than the gross
+expectancy of about `$0.0084` per completed trade.
 
 The useful result is not "trade this." The useful result is that the first
 candidate can be expressed through shared strategy decisions and backtested over
-the trusted normalized cache. Next research should add explicit cost/slippage
-modeling, daily performance distribution, time-of-day breakdowns, and stricter
-regime filters before any paper/live validation.
+the trusted normalized cache with reusable diagnostics. Next research should add
+stricter regime filters before any paper/live validation.
 
 ### Next Research Plan
 

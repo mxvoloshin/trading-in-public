@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from trade_core import (
     DecisionAction,
@@ -35,6 +36,7 @@ class SimulatedFill:
         filled_at_utc: UTC timestamp of the simulated fill.
         side: Buy or sell side from the broker-neutral order intent.
         quantity: Simulated filled quantity.
+        reference_price: Next-bar open before execution costs.
         price: Simulated fill price after the configured slippage model.
         commission: Simulated commission charged for this fill.
     """
@@ -43,8 +45,29 @@ class SimulatedFill:
     filled_at_utc: datetime
     side: OrderSide
     quantity: Decimal
+    reference_price: Decimal
     price: Decimal
     commission: Decimal
+
+    @property
+    def slippage_cost(self) -> Decimal:
+        """Return the absolute slippage drag paid by this fill."""
+        return abs(self.price - self.reference_price) * self.quantity
+
+
+@dataclass(frozen=True, slots=True)
+class ClosedTrade:
+    """Completed simulated trade used for diagnostics and regime summaries.
+
+    Parameters:
+        entered_at_utc: UTC timestamp of the opening fill.
+        exited_at_utc: UTC timestamp of the closing fill.
+        pnl: Net realized PnL after entry/exit commissions and slippage.
+    """
+
+    entered_at_utc: datetime
+    exited_at_utc: datetime
+    pnl: Decimal
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,17 +133,28 @@ class BacktestSummary:
     commission_per_share: Decimal
     minimum_commission: Decimal
     total_commissions: Decimal
+    total_slippage_cost: Decimal
+    total_execution_costs: Decimal
+    cost_per_closed_trade: Decimal
     closed_trades: int
     winning_trades: int
     losing_trades: int
     win_rate: Decimal
+    expectancy_per_trade: Decimal
+    expectancy_per_day: Decimal
+    median_trade_pnl: Decimal
     average_win: Decimal
     average_loss: Decimal
+    best_trade_pnl: Decimal
+    worst_trade_pnl: Decimal
     profit_factor: Decimal
     max_drawdown: Decimal
+    max_drawdown_duration_trades: int
+    daily_breakdown: dict[str, dict[str, str | int]]
+    time_of_day_breakdown: dict[str, dict[str, str | int]]
     output_path: Path | None
 
-    def to_json_dict(self) -> dict[str, str | int]:
+    def to_json_dict(self) -> dict[str, str | int | dict[str, dict[str, str | int]]]:
         """Serialize the summary using JSON-safe primitives."""
         return {
             "strategy_name": self.strategy_name,
@@ -139,14 +173,25 @@ class BacktestSummary:
             "commission_per_share": str(self.commission_per_share),
             "minimum_commission": str(self.minimum_commission),
             "total_commissions": str(self.total_commissions),
+            "total_slippage_cost": str(self.total_slippage_cost),
+            "total_execution_costs": str(self.total_execution_costs),
+            "cost_per_closed_trade": str(self.cost_per_closed_trade),
             "closed_trades": self.closed_trades,
             "winning_trades": self.winning_trades,
             "losing_trades": self.losing_trades,
             "win_rate": str(self.win_rate),
+            "expectancy_per_trade": str(self.expectancy_per_trade),
+            "expectancy_per_day": str(self.expectancy_per_day),
+            "median_trade_pnl": str(self.median_trade_pnl),
             "average_win": str(self.average_win),
             "average_loss": str(self.average_loss),
+            "best_trade_pnl": str(self.best_trade_pnl),
+            "worst_trade_pnl": str(self.worst_trade_pnl),
             "profit_factor": str(self.profit_factor),
             "max_drawdown": str(self.max_drawdown),
+            "max_drawdown_duration_trades": self.max_drawdown_duration_trades,
+            "daily_breakdown": self.daily_breakdown,
+            "time_of_day_breakdown": self.time_of_day_breakdown,
         }
 
 
@@ -190,11 +235,13 @@ def run_minimal_backtest(
     average_entry_price = Decimal("0")
     realized_pnl = Decimal("0")
     total_commissions = Decimal("0")
+    total_slippage_cost = Decimal("0")
     open_trade_commissions = Decimal("0")
+    open_trade_entered_at_utc: datetime | None = None
     decisions = 0
     risk_decisions: list[RiskDecision] = []
     fills: list[SimulatedFill] = []
-    closed_trade_pnls: list[Decimal] = []
+    closed_trades: list[ClosedTrade] = []
     pending_order_intent: OrderIntent | None = None
 
     for sequence_number, bar in enumerate(bars, start=1):
@@ -210,6 +257,7 @@ def run_minimal_backtest(
             )
             fills.append(fill)
             total_commissions += fill.commission
+            total_slippage_cost += fill.slippage_cost
             trade_pnl = _closed_trade_pnl(
                 fill=fill,
                 position=position,
@@ -223,12 +271,22 @@ def run_minimal_backtest(
                 realized_pnl=realized_pnl,
             )
             if trade_pnl is not None:
-                closed_trade_pnls.append(trade_pnl)
+                if open_trade_entered_at_utc is None:
+                    msg = "closing fill encountered without an opening fill timestamp"
+                    raise ValueError(msg)
+                closed_trades.append(
+                    ClosedTrade(
+                        entered_at_utc=open_trade_entered_at_utc,
+                        exited_at_utc=fill.filled_at_utc,
+                        pnl=trade_pnl,
+                    )
+                )
             open_trade_commissions = (
                 open_trade_commissions + fill.commission
                 if fill.side == OrderSide.BUY
                 else Decimal("0")
             )
+            open_trade_entered_at_utc = fill.filled_at_utc if fill.side == OrderSide.BUY else None
             pending_order_intent = None
 
         # Bar timestamps identify the start of the OHLCV window. A close-based
@@ -296,7 +354,13 @@ def run_minimal_backtest(
         average_entry_price=average_entry_price,
         last_close=Decimal(str(bars[-1].close)) if bars else Decimal("0"),
     )
-    trade_metrics = _trade_metrics(closed_trade_pnls)
+    trade_metrics = _trade_metrics(closed_trades)
+    daily_breakdown = _closed_trade_breakdown(closed_trades, timezone=session_config.timezone)
+    time_of_day_breakdown = _time_of_day_breakdown(
+        closed_trades,
+        timezone=session_config.timezone,
+    )
+    total_execution_costs = total_commissions + total_slippage_cost
     summary = BacktestSummary(
         strategy_name=strategy.name,
         instrument_id=request.instrument.instrument_id,
@@ -314,14 +378,34 @@ def run_minimal_backtest(
         commission_per_share=cost_model.commission_per_share,
         minimum_commission=cost_model.minimum_commission,
         total_commissions=total_commissions,
+        total_slippage_cost=total_slippage_cost,
+        total_execution_costs=total_execution_costs,
+        cost_per_closed_trade=(
+            total_execution_costs / Decimal(trade_metrics.closed_trades)
+            if trade_metrics.closed_trades
+            else Decimal("0")
+        ),
         closed_trades=trade_metrics.closed_trades,
         winning_trades=trade_metrics.winning_trades,
         losing_trades=trade_metrics.losing_trades,
         win_rate=trade_metrics.win_rate,
+        expectancy_per_trade=trade_metrics.expectancy_per_trade,
+        expectancy_per_day=(
+            sum((trade.pnl for trade in closed_trades), Decimal("0"))
+            / Decimal(len(daily_breakdown))
+            if daily_breakdown
+            else Decimal("0")
+        ),
+        median_trade_pnl=trade_metrics.median_trade_pnl,
         average_win=trade_metrics.average_win,
         average_loss=trade_metrics.average_loss,
+        best_trade_pnl=trade_metrics.best_trade_pnl,
+        worst_trade_pnl=trade_metrics.worst_trade_pnl,
         profit_factor=trade_metrics.profit_factor,
         max_drawdown=trade_metrics.max_drawdown,
+        max_drawdown_duration_trades=trade_metrics.max_drawdown_duration_trades,
+        daily_breakdown=daily_breakdown,
+        time_of_day_breakdown=time_of_day_breakdown,
         output_path=output_path,
     )
     if output_path is not None:
@@ -367,6 +451,7 @@ def _simulate_next_open_fill(
         filled_at_utc=filled_at_utc.astimezone(UTC),
         side=order_intent.side,
         quantity=order_intent.quantity,
+        reference_price=reference_price,
         price=cost_model.fill_price(
             side=order_intent.side,
             reference_price=reference_price,
@@ -441,38 +526,66 @@ class _TradeMetrics:
     winning_trades: int
     losing_trades: int
     win_rate: Decimal
+    expectancy_per_trade: Decimal
+    median_trade_pnl: Decimal
     average_win: Decimal
     average_loss: Decimal
+    best_trade_pnl: Decimal
+    worst_trade_pnl: Decimal
     profit_factor: Decimal
     max_drawdown: Decimal
+    max_drawdown_duration_trades: int
 
 
-def _trade_metrics(closed_trade_pnls: list[Decimal]) -> _TradeMetrics:
+def _trade_metrics(closed_trades: list[ClosedTrade]) -> _TradeMetrics:
     """Calculate simple distribution metrics from completed trade PnL values."""
+    closed_trade_pnls = [trade.pnl for trade in closed_trades]
     winning_pnls = [pnl for pnl in closed_trade_pnls if pnl > 0]
     losing_pnls = [pnl for pnl in closed_trade_pnls if pnl < 0]
     gross_profit = sum(winning_pnls, Decimal("0"))
     gross_loss = abs(sum(losing_pnls, Decimal("0")))
-    closed_trades = len(closed_trade_pnls)
+    closed_trade_count = len(closed_trade_pnls)
 
     return _TradeMetrics(
-        closed_trades=closed_trades,
+        closed_trades=closed_trade_count,
         winning_trades=len(winning_pnls),
         losing_trades=len(losing_pnls),
         win_rate=(
-            Decimal(len(winning_pnls)) / Decimal(closed_trades) if closed_trades else Decimal("0")
+            Decimal(len(winning_pnls)) / Decimal(closed_trade_count)
+            if closed_trade_count
+            else Decimal("0")
         ),
+        expectancy_per_trade=(
+            sum(closed_trade_pnls, Decimal("0")) / Decimal(closed_trade_count)
+            if closed_trade_count
+            else Decimal("0")
+        ),
+        median_trade_pnl=_median_decimal(closed_trade_pnls),
         average_win=(gross_profit / Decimal(len(winning_pnls)) if winning_pnls else Decimal("0")),
         average_loss=(
             sum(losing_pnls, Decimal("0")) / Decimal(len(losing_pnls))
             if losing_pnls
             else Decimal("0")
         ),
+        best_trade_pnl=max(closed_trade_pnls) if closed_trade_pnls else Decimal("0"),
+        worst_trade_pnl=min(closed_trade_pnls) if closed_trade_pnls else Decimal("0"),
         profit_factor=(
             gross_profit / gross_loss if gross_profit > 0 and gross_loss > 0 else Decimal("0")
         ),
         max_drawdown=_max_drawdown(closed_trade_pnls),
+        max_drawdown_duration_trades=_max_drawdown_duration_trades(closed_trade_pnls),
     )
+
+
+def _median_decimal(values: list[Decimal]) -> Decimal:
+    """Return the median value while preserving Decimal precision."""
+    if not values:
+        return Decimal("0")
+    sorted_values = sorted(values)
+    midpoint = len(sorted_values) // 2
+    if len(sorted_values) % 2 == 1:
+        return sorted_values[midpoint]
+    return (sorted_values[midpoint - 1] + sorted_values[midpoint]) / Decimal("2")
 
 
 def _max_drawdown(closed_trade_pnls: list[Decimal]) -> Decimal:
@@ -485,6 +598,74 @@ def _max_drawdown(closed_trade_pnls: list[Decimal]) -> Decimal:
         peak = max(peak, equity)
         max_drawdown = min(max_drawdown, equity - peak)
     return max_drawdown
+
+
+def _max_drawdown_duration_trades(closed_trade_pnls: list[Decimal]) -> int:
+    """Return the longest completed-trade count spent below an equity peak."""
+    equity = Decimal("0")
+    peak = Decimal("0")
+    current_duration = 0
+    max_duration = 0
+    for trade_pnl in closed_trade_pnls:
+        equity += trade_pnl
+        if equity >= peak:
+            peak = equity
+            current_duration = 0
+            continue
+        current_duration += 1
+        max_duration = max(max_duration, current_duration)
+    return max_duration
+
+
+def _closed_trade_breakdown(
+    closed_trades: list[ClosedTrade],
+    *,
+    timezone: str,
+) -> dict[str, dict[str, str | int]]:
+    """Group completed trades by market-local exit date."""
+    zone = ZoneInfo(timezone)
+    buckets: dict[str, list[Decimal]] = {}
+    for trade in closed_trades:
+        local_date = trade.exited_at_utc.astimezone(zone).date().isoformat()
+        buckets.setdefault(local_date, []).append(trade.pnl)
+    return {bucket: _pnl_bucket_summary(pnls) for bucket, pnls in sorted(buckets.items())}
+
+
+def _time_of_day_breakdown(
+    closed_trades: list[ClosedTrade],
+    *,
+    timezone: str,
+) -> dict[str, dict[str, str | int]]:
+    """Group completed trades into 30-minute market-local exit buckets."""
+    zone = ZoneInfo(timezone)
+    buckets: dict[str, list[Decimal]] = {}
+    for trade in closed_trades:
+        local_exit = trade.exited_at_utc.astimezone(zone)
+        bucket_minute = 30 if local_exit.minute >= 30 else 0
+        bucket_start = local_exit.replace(
+            minute=bucket_minute,
+            second=0,
+            microsecond=0,
+        )
+        bucket_end = bucket_start + timedelta(minutes=30)
+        label = f"{bucket_start:%H:%M}-{bucket_end:%H:%M}"
+        buckets.setdefault(label, []).append(trade.pnl)
+    return {bucket: _pnl_bucket_summary(pnls) for bucket, pnls in sorted(buckets.items())}
+
+
+def _pnl_bucket_summary(pnls: list[Decimal]) -> dict[str, str | int]:
+    """Summarize one bucket of completed trade PnL values."""
+    total_pnl = sum(pnls, Decimal("0"))
+    winning_trades = sum(1 for pnl in pnls if pnl > 0)
+    losing_trades = sum(1 for pnl in pnls if pnl < 0)
+    return {
+        "closed_trades": len(pnls),
+        "winning_trades": winning_trades,
+        "losing_trades": losing_trades,
+        "win_rate": str(Decimal(winning_trades) / Decimal(len(pnls)) if pnls else Decimal("0")),
+        "total_pnl": str(total_pnl),
+        "expectancy": str(total_pnl / Decimal(len(pnls)) if pnls else Decimal("0")),
+    }
 
 
 def _bar_close_time(timeframe: str, timestamp_utc: datetime) -> datetime:
