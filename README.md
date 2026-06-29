@@ -55,6 +55,23 @@ uv run python -m trade_research_app market-data fetch \
 
 See `docs/market-data.md` for Alpaca credentials, local cache layout, and public safety rules.
 
+## Backtesting
+
+Run the first minimal backtest against locally cached normalized bars:
+
+```sh
+uv run python -m trade_research_app backtest run \
+  --symbol SPY \
+  --timeframe 5Min \
+  --start 2025-06-28 \
+  --end 2026-06-27 \
+  --market XNYS \
+  --session regular
+```
+
+See `docs/backtesting.md` for the current strategy behavior, output location, and
+public safety rules.
+
 ## Python Workspace
 
 The trading system code lives in a `uv` workspace.
