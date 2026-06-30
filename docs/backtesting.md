@@ -421,6 +421,77 @@ edge:
 | `slippage_1bps` | `-$8.52867929` | `-$0.0194275155` | `0.9734` | `$59.62757929` | `1.17x` |
 | `slippage_1bps_commission` | `-$12.91867929` | `-$0.0294275155` | `0.9600` | `$64.01757929` | `1.25x` |
 
+### Trend-Day VWAP Reclaim Candidate
+
+The first narrowed trend-continuation candidate is available as
+`trend-day-vwap-reclaim`:
+
+```sh
+uv run python -m trade_research_app backtest run \
+  --strategy trend-day-vwap-reclaim \
+  --symbol SPY \
+  --timeframe 5Min \
+  --start 2025-06-28 \
+  --end 2026-06-27 \
+  --market XNYS \
+  --session regular
+```
+
+This variant is long-only and intentionally stricter than the baseline:
+
+- no entries before 10:00 New York time
+- no entries after 14:30 New York time
+- max one trade per day
+- requires price above the opening-range high and rising VWAP
+- enters only after a VWAP retest/reclaim that closes above VWAP and above the
+  prior close
+- exits on two consecutive closes below VWAP, a close below the signal-bar low,
+  or end-of-day flattening
+
+One-year comparison, same cached SPY 5-minute regular-session data and quantity
+`1`:
+
+| Strategy | Cost model | Closed trades | Total PnL | Expectancy / trade | Profit factor | Max DD |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `spy-vwap-pullback` | 1 bp + `$0.005/share` | `278` | `-$38.26795096` | `-$0.1376544999` | `0.8039` | `-$40.94114950` |
+| `spy-vwap-pullback-long-short` | 1 bp + `$0.005/share` | `439` | `-$12.91867929` | `-$0.0294275155` | `0.9600` | `-$34.74503443` |
+| `trend-day-vwap-reclaim` | gross | `176` | `$23.1870` | `$0.1317443182` | `1.2173` | `-$14.2609` |
+| `trend-day-vwap-reclaim` | 1 bp + `$0.005/share` | `176` | `-$2.57240342` | `-$0.0146159285` | `0.9793` | `-$16.33685627` |
+
+Cost stress for `trend-day-vwap-reclaim`:
+
+| Scenario | Total PnL | Expectancy / trade | Profit factor | Gross edge consumed |
+| --- | ---: | ---: | ---: | ---: |
+| `gross` | `$23.1870` | `$0.1317443182` | `1.2173` | `0.00x` |
+| `slippage_0_5bps` | `$11.187298290` | `$0.0635641948` | `1.0974` | `0.52x` |
+| `slippage_1bps` | `-$0.81240342` | `-$0.0046159285` | `0.9934` | `1.04x` |
+| `slippage_1bps_commission` | `-$2.57240342` | `-$0.0146159285` | `0.9793` | `1.11x` |
+
+The trend split explains both the promise and the rejection:
+
+| Regime tag | Closed trades | Win rate | Total PnL | Expectancy |
+| --- | ---: | ---: | ---: | ---: |
+| `trend_up` | `90` | `55.56%` | `$78.45697583` | `$0.8717` |
+| `chop_or_mixed` | `55` | `10.91%` | `-$44.53386300` | `-$0.8097` |
+| `trend_down` | `31` | `3.23%` | `-$36.49551625` | `-$1.1773` |
+
+Robustness split:
+
+- first half: `88` trades, `$0.37590525`, `$0.0043` expectancy
+- second half: `88` trades, `-$2.94830867`, `-$0.0335` expectancy
+- best rolling 6-month window: `$18.45239104`
+- worst rolling 6-month window: `-$14.50730677`
+- event days: `25` trades, `-$11.26096805`
+- ordinary sessions: `151` trades, `$8.68856463`
+
+Verdict: reject as a live/paper candidate under the current kill criteria. It is
+better than the baseline and the symmetric long/short variant on gross edge,
+trade count, and drawdown, but the mild cost model still flips it negative. The
+useful research signal is that trend-up sessions are strongly positive while
+chop/mixed and trend-down sessions are the damage centers; the next task should
+focus on earlier tradable filters for those regimes rather than relaxing exits
+or tuning a large parameter grid.
+
 The robustness diagnostics keep both variants below the bar for live or
 paper/live validation.
 

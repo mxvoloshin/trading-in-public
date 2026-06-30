@@ -15,6 +15,7 @@ from trade_strategies import (
     SpyVwapPullbackStrategy,
     StrategyDecisionContext,
     SymmetricSpyVwapPullbackStrategy,
+    TrendDayVwapReclaimStrategy,
     get_strategy,
 )
 
@@ -117,6 +118,110 @@ def test_symmetric_spy_vwap_pullback_exits_short_when_close_reclaims_vwap() -> N
     assert "close_above_vwap" in decision.reason
 
 
+def test_trend_day_vwap_reclaim_enters_after_retest_and_reclaim() -> None:
+    strategy = TrendDayVwapReclaimStrategy()
+    bars = _trend_day_reclaim_setup_bars()
+
+    decisions = _decisions_for_bars(strategy, bars, position_quantity=Decimal("0"))
+
+    assert decisions[-1].action == DecisionAction.ENTER_LONG
+    assert decisions[-1].strategy_name == "trend-day-vwap-reclaim"
+    assert "trend_day_vwap_reclaim" in decisions[-1].reason
+
+
+def test_trend_day_vwap_reclaim_skips_entries_before_10am() -> None:
+    strategy = TrendDayVwapReclaimStrategy()
+    bars = _trend_day_reclaim_setup_bars()[:6]
+
+    decisions = _decisions_for_bars(strategy, bars, position_quantity=Decimal("0"))
+
+    assert decisions[-1].action == DecisionAction.HOLD
+    assert "entry_context_not_ready" in decisions[-1].reason
+
+
+def test_trend_day_vwap_reclaim_exits_after_two_closes_below_vwap() -> None:
+    strategy = TrendDayVwapReclaimStrategy()
+    setup_bars = _trend_day_reclaim_setup_bars()
+    _decisions_for_bars(strategy, setup_bars, position_quantity=Decimal("0"))
+
+    first_close_below = _bar(index=8, open=104.0, high=104.5, low=101.5, close=102.5)
+    first_decision = strategy.decide(
+        bar=first_close_below,
+        context=_context(
+            bar=first_close_below,
+            sequence_number=9,
+            previous_bar=setup_bars[-1],
+            position_quantity=Decimal("1"),
+        ),
+    )
+    second_close_below = _bar(index=9, open=102.5, high=103.0, low=101.5, close=102.0)
+    second_decision = strategy.decide(
+        bar=second_close_below,
+        context=_context(
+            bar=second_close_below,
+            sequence_number=10,
+            previous_bar=first_close_below,
+            position_quantity=Decimal("1"),
+        ),
+    )
+
+    assert first_decision.action == DecisionAction.HOLD
+    assert "first_close_below_vwap" in first_decision.reason
+    assert second_decision.action == DecisionAction.EXIT_LONG
+    assert "two_closes_below_vwap" in second_decision.reason
+
+
+def test_trend_day_vwap_reclaim_exits_when_signal_low_fails() -> None:
+    strategy = TrendDayVwapReclaimStrategy()
+    setup_bars = _trend_day_reclaim_setup_bars()
+    _decisions_for_bars(strategy, setup_bars, position_quantity=Decimal("0"))
+
+    exit_bar = _bar(index=8, open=103.0, high=103.5, low=100.5, close=100.8)
+    decision = strategy.decide(
+        bar=exit_bar,
+        context=_context(
+            bar=exit_bar,
+            sequence_number=9,
+            previous_bar=setup_bars[-1],
+            position_quantity=Decimal("1"),
+        ),
+    )
+
+    assert decision.action == DecisionAction.EXIT_LONG
+    assert "close_below_signal_bar_low" in decision.reason
+
+
+def test_trend_day_vwap_reclaim_allows_only_one_trade_per_day() -> None:
+    strategy = TrendDayVwapReclaimStrategy()
+    setup_bars = _trend_day_reclaim_setup_bars()
+    decisions = _decisions_for_bars(strategy, setup_bars, position_quantity=Decimal("0"))
+    assert decisions[-1].action == DecisionAction.ENTER_LONG
+
+    second_retest = _bar(index=8, open=105.0, high=105.2, low=102.0, close=103.0)
+    second_reclaim = _bar(index=9, open=103.0, high=106.0, low=102.5, close=106.0)
+    strategy.decide(
+        bar=second_retest,
+        context=_context(
+            bar=second_retest,
+            sequence_number=9,
+            previous_bar=setup_bars[-1],
+            position_quantity=Decimal("0"),
+        ),
+    )
+    decision = strategy.decide(
+        bar=second_reclaim,
+        context=_context(
+            bar=second_reclaim,
+            sequence_number=10,
+            previous_bar=second_retest,
+            position_quantity=Decimal("0"),
+        ),
+    )
+
+    assert decision.action == DecisionAction.HOLD
+    assert "entry_context_not_ready" in decision.reason
+
+
 def test_spy_vwap_pullback_respects_max_daily_trades() -> None:
     strategy = SpyVwapPullbackStrategy(max_trades_per_day=1)
     first_setup = (
@@ -169,6 +274,12 @@ def test_strategy_registry_returns_symmetric_spy_vwap_pullback() -> None:
     assert strategy.name == "spy-vwap-pullback-long-short"
 
 
+def test_strategy_registry_returns_trend_day_vwap_reclaim() -> None:
+    strategy = get_strategy("trend-day-vwap-reclaim")
+
+    assert strategy.name == "trend-day-vwap-reclaim"
+
+
 def _decisions_for_bars(
     strategy: SpyVwapPullbackStrategy | SymmetricSpyVwapPullbackStrategy,
     bars: tuple[Bar, ...],
@@ -190,6 +301,19 @@ def _decisions_for_bars(
         decisions.append(decision)
         previous_bar = bar
     return decisions
+
+
+def _trend_day_reclaim_setup_bars() -> tuple[Bar, ...]:
+    return (
+        _bar(index=0, open=100.0, high=101.0, low=99.0, close=100.0),
+        _bar(index=1, open=100.0, high=101.5, low=100.0, close=101.0),
+        _bar(index=2, open=101.0, high=102.5, low=101.0, close=102.0),
+        _bar(index=3, open=102.0, high=103.5, low=102.0, close=103.0),
+        _bar(index=4, open=103.0, high=104.5, low=103.0, close=104.0),
+        _bar(index=5, open=104.0, high=105.5, low=104.0, close=105.0),
+        _bar(index=6, open=104.0, high=104.0, low=102.0, close=103.0),
+        _bar(index=7, open=103.5, high=105.2, low=101.0, close=105.0),
+    )
 
 
 def _context(
