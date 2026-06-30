@@ -36,6 +36,7 @@ class _SessionState:
     previous_bar: Bar | None = None
     trades_entered: int = 0
     pullback_low: Decimal | None = None
+    pullback_high: Decimal | None = None
 
 
 @dataclass(slots=True)
@@ -57,6 +58,7 @@ class SpyVwapPullbackStrategy:
     """
 
     name: ClassVar[str] = "spy-vwap-pullback"
+    allow_short: ClassVar[bool] = False
 
     max_trades_per_day: int = 2
     min_bars_before_entry: int = 6
@@ -90,7 +92,9 @@ class SpyVwapPullbackStrategy:
             state.opening_range_low = Decimal(str(bar.low))
             reason = "opening_range_seeded"
         elif context.position_quantity > 0:
-            action, reason = self._open_position_decision(state=state, bar=bar)
+            action, reason = self._open_long_decision(state=state, bar=bar)
+        elif context.position_quantity < 0:
+            action, reason = self._open_short_decision(state=state, bar=bar)
         else:
             action, reason = self._flat_position_decision(state=state, bar=bar)
 
@@ -128,10 +132,26 @@ class SpyVwapPullbackStrategy:
         state: _SessionState,
         bar: Bar,
     ) -> tuple[DecisionAction, str]:
-        """Decide whether a flat strategy should request a long entry."""
+        """Decide whether a flat strategy should request a directional entry."""
         if not self._has_entry_context(state=state, bar=bar):
             return DecisionAction.HOLD, "entry_context_not_ready"
 
+        long_action, long_reason = self._long_entry_decision(state=state, bar=bar)
+        if long_action != DecisionAction.HOLD:
+            return long_action, long_reason
+        if self.allow_short:
+            short_action, short_reason = self._short_entry_decision(state=state, bar=bar)
+            if short_action != DecisionAction.HOLD:
+                return short_action, short_reason
+        return DecisionAction.HOLD, "pullback_entry_filter_not_met"
+
+    def _long_entry_decision(
+        self,
+        *,
+        state: _SessionState,
+        bar: Bar,
+    ) -> tuple[DecisionAction, str]:
+        """Decide whether a flat strategy should request a long entry."""
         current_vwap = _required_decimal(state.current_vwap, "current_vwap")
         previous_vwap = _required_decimal(state.previous_vwap, "previous_vwap")
         opening_range_high = _required_decimal(
@@ -169,9 +189,54 @@ class SpyVwapPullbackStrategy:
             state.pullback_low = previous_low
             return DecisionAction.ENTER_LONG, "vwap_pullback_resumed_above_opening_range"
 
-        return DecisionAction.HOLD, "pullback_entry_filter_not_met"
+        return DecisionAction.HOLD, "long_pullback_entry_filter_not_met"
 
-    def _open_position_decision(
+    def _short_entry_decision(
+        self,
+        *,
+        state: _SessionState,
+        bar: Bar,
+    ) -> tuple[DecisionAction, str]:
+        """Decide whether a flat strategy should request a short entry."""
+        current_vwap = _required_decimal(state.current_vwap, "current_vwap")
+        previous_vwap = _required_decimal(state.previous_vwap, "previous_vwap")
+        opening_range_low = _required_decimal(
+            state.opening_range_low,
+            "opening_range_low",
+        )
+        previous_bar = _required_bar(state.previous_bar)
+
+        previous_high = Decimal(str(previous_bar.high))
+        previous_close = Decimal(str(previous_bar.close))
+        current_close = Decimal(str(bar.close))
+        current_open = Decimal(str(bar.open))
+        current_low = Decimal(str(bar.low))
+
+        # Mirror the long pullback rule: a bearish retest should get close to
+        # VWAP from below without fully reclaiming it, then resume lower.
+        retest_near_vwap = previous_high >= current_vwap * (Decimal("1") - self.pullback_tolerance)
+        retest_held_vwap = previous_close <= previous_vwap * (
+            Decimal("1") + self.pullback_tolerance
+        )
+        trend_resumed = current_close < Decimal(str(previous_bar.low)) and (
+            current_close < current_open
+        )
+
+        if (
+            current_vwap < previous_vwap
+            and current_close < current_vwap
+            and current_low < opening_range_low
+            and retest_near_vwap
+            and retest_held_vwap
+            and trend_resumed
+        ):
+            state.trades_entered += 1
+            state.pullback_high = previous_high
+            return DecisionAction.ENTER_SHORT, "vwap_retest_resumed_below_opening_range"
+
+        return DecisionAction.HOLD, "short_retest_entry_filter_not_met"
+
+    def _open_long_decision(
         self,
         *,
         state: _SessionState,
@@ -190,6 +255,26 @@ class SpyVwapPullbackStrategy:
             return DecisionAction.EXIT_LONG, "pullback_structure_failed"
 
         return DecisionAction.HOLD, "long_thesis_still_valid"
+
+    def _open_short_decision(
+        self,
+        *,
+        state: _SessionState,
+        bar: Bar,
+    ) -> tuple[DecisionAction, str]:
+        """Decide whether an open short should exit."""
+        local_time = bar.timestamp_utc.astimezone(NEW_YORK).time()
+        current_close = Decimal(str(bar.close))
+        current_vwap = _required_decimal(state.current_vwap, "current_vwap")
+
+        if local_time >= self.flatten_from:
+            return DecisionAction.EXIT_SHORT, "end_of_day_flatten"
+        if current_close > current_vwap:
+            return DecisionAction.EXIT_SHORT, "close_above_vwap"
+        if state.pullback_high is not None and current_close > state.pullback_high:
+            return DecisionAction.EXIT_SHORT, "short_pullback_structure_failed"
+
+        return DecisionAction.HOLD, "short_thesis_still_valid"
 
     def _has_entry_context(self, *, state: _SessionState, bar: Bar) -> bool:
         """Return whether enough session context exists to consider entries."""
@@ -246,3 +331,11 @@ def _required_bar(value: Bar | None) -> Bar:
         msg = "previous_bar is required before evaluating this strategy rule"
         raise RuntimeError(msg)
     return value
+
+
+@dataclass(slots=True)
+class SymmetricSpyVwapPullbackStrategy(SpyVwapPullbackStrategy):
+    """Long and short SPY VWAP pullback candidate for trend-continuation research."""
+
+    name: ClassVar[str] = "spy-vwap-pullback-long-short"
+    allow_short: ClassVar[bool] = True

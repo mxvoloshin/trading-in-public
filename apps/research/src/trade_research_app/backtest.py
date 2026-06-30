@@ -66,8 +66,9 @@ class ClosedTrade:
         exit_reason: Strategy decision reason that requested the closing fill.
         exit_price: Simulated closing fill price after slippage.
         quantity: Simulated closed quantity.
-        post_exit_max_favorable_pnl: Best same-session long-side move after exit,
-            measured from the simulated exit fill price.
+        entry_side: Opening side for the trade. Buy means long, sell means short.
+        post_exit_max_favorable_pnl: Best same-session move after exit in the
+            trade's original direction, measured from the simulated exit fill price.
         gap_bucket: Session gap bucket derived from prior regular-session close.
         opening_range_state: Session state after the first 30 minutes.
         trend_state: Full-session VWAP/close trend proxy.
@@ -80,6 +81,7 @@ class ClosedTrade:
     exit_reason: str
     exit_price: Decimal
     quantity: Decimal
+    entry_side: OrderSide
     post_exit_max_favorable_pnl: Decimal
     gap_bucket: str
     opening_range_state: str
@@ -348,6 +350,7 @@ def run_minimal_backtest(
     total_slippage_cost = Decimal("0")
     open_trade_commissions = Decimal("0")
     open_trade_entered_at_utc: datetime | None = None
+    open_trade_entry_side: OrderSide | None = None
     decisions = 0
     risk_decisions: list[RiskDecision] = []
     fills: list[SimulatedFill] = []
@@ -369,6 +372,7 @@ def run_minimal_backtest(
             fills.append(fill)
             total_commissions += fill.commission
             total_slippage_cost += fill.slippage_cost
+            previous_position = position
             trade_pnl = _closed_trade_pnl(
                 fill=fill,
                 position=position,
@@ -392,6 +396,7 @@ def run_minimal_backtest(
                         exit_reason=pending_exit_reason or "unknown_exit_reason",
                         exit_price=fill.price,
                         quantity=fill.quantity,
+                        entry_side=_required_order_side(open_trade_entry_side),
                         post_exit_max_favorable_pnl=Decimal("0"),
                         gap_bucket="unknown_gap",
                         opening_range_state="unknown_opening_range",
@@ -400,12 +405,14 @@ def run_minimal_backtest(
                         pnl=trade_pnl,
                     )
                 )
-            open_trade_commissions = (
-                open_trade_commissions + fill.commission
-                if fill.side == OrderSide.BUY
-                else Decimal("0")
-            )
-            open_trade_entered_at_utc = fill.filled_at_utc if fill.side == OrderSide.BUY else None
+            if _is_opening_fill(fill=fill, previous_position=previous_position):
+                open_trade_commissions += fill.commission
+                open_trade_entered_at_utc = fill.filled_at_utc
+                open_trade_entry_side = fill.side
+            elif trade_pnl is not None:
+                open_trade_commissions = Decimal("0")
+                open_trade_entered_at_utc = None
+                open_trade_entry_side = None
             pending_order_intent = None
             pending_exit_reason = None
 
@@ -451,7 +458,7 @@ def run_minimal_backtest(
         # The strategy stops at `StrategyDecision`; the runner translates that
         # approved decision into a broker-neutral intent that future live
         # execution can also understand.
-        side = OrderSide.BUY if decision.action == DecisionAction.ENTER_LONG else OrderSide.SELL
+        side = _order_side_for_action(decision.action)
         order_intent = OrderIntent(
             strategy_decision_id=decision.strategy_decision_id,
             risk_decision_id=risk_decision.risk_decision_id,
@@ -466,7 +473,7 @@ def run_minimal_backtest(
             ),
         )
         pending_order_intent = order_intent
-        if decision.action == DecisionAction.EXIT_LONG:
+        if decision.action in (DecisionAction.EXIT_LONG, DecisionAction.EXIT_SHORT):
             pending_exit_reason = _decision_rule_reason(decision.reason)
 
     # If the data window ends while a position is open, realized PnL alone is
@@ -690,7 +697,21 @@ def _risk_outcome_for_action(action: DecisionAction, position: Decimal) -> RiskO
         return RiskOutcome.APPROVED
     if action == DecisionAction.EXIT_LONG and position > 0:
         return RiskOutcome.APPROVED
+    if action == DecisionAction.ENTER_SHORT and position == 0:
+        return RiskOutcome.APPROVED
+    if action == DecisionAction.EXIT_SHORT and position < 0:
+        return RiskOutcome.APPROVED
     return RiskOutcome.REJECTED
+
+
+def _order_side_for_action(action: DecisionAction) -> OrderSide:
+    """Translate a strategy action into the order side needed to execute it."""
+    if action in (DecisionAction.ENTER_LONG, DecisionAction.EXIT_SHORT):
+        return OrderSide.BUY
+    if action in (DecisionAction.EXIT_LONG, DecisionAction.ENTER_SHORT):
+        return OrderSide.SELL
+    msg = f"cannot create an order side for action {action}"
+    raise ValueError(msg)
 
 
 def _simulate_next_open_fill(
@@ -734,14 +755,22 @@ def _apply_fill(
     Parameters:
         fill: Backtest-only fill to apply.
         position: Position before the fill.
-        average_entry_price: Current long entry price for the simple one-unit
+        average_entry_price: Current entry price for the simple one-unit
             accounting model.
         realized_pnl: Realized PnL before the fill.
     """
-    # The first runner supports one long unit at a time. That keeps simulated
-    # execution obvious while proving the decision -> intent -> fill chain.
     if fill.side == OrderSide.BUY:
+        if position < 0:
+            new_position = position + fill.quantity
+            new_realized_pnl = (
+                realized_pnl + (average_entry_price - fill.price) * fill.quantity - fill.commission
+            )
+            new_average_entry_price = Decimal("0") if new_position == 0 else average_entry_price
+            return new_position, new_average_entry_price, new_realized_pnl
         return position + fill.quantity, fill.price, realized_pnl - fill.commission
+
+    if position == 0:
+        return position - fill.quantity, fill.price, realized_pnl - fill.commission
 
     new_position = position - fill.quantity
     new_realized_pnl = (
@@ -758,14 +787,35 @@ def _closed_trade_pnl(
     average_entry_price: Decimal,
     open_trade_commissions: Decimal,
 ) -> Decimal | None:
-    """Return realized trade PnL when a fill closes a simple long position."""
-    if fill.side != OrderSide.SELL or position <= 0:
-        return None
-    return (
-        (fill.price - average_entry_price) * fill.quantity
-        - open_trade_commissions
-        - fill.commission
-    )
+    """Return realized trade PnL when a fill closes a simple one-unit position."""
+    if fill.side == OrderSide.SELL and position > 0:
+        return (
+            (fill.price - average_entry_price) * fill.quantity
+            - open_trade_commissions
+            - fill.commission
+        )
+    if fill.side == OrderSide.BUY and position < 0:
+        return (
+            (average_entry_price - fill.price) * fill.quantity
+            - open_trade_commissions
+            - fill.commission
+        )
+    return None
+
+
+def _is_opening_fill(*, fill: SimulatedFill, previous_position: Decimal) -> bool:
+    """Return whether a fill opens a new long or short position."""
+    if previous_position != 0:
+        return False
+    return fill.side in (OrderSide.BUY, OrderSide.SELL)
+
+
+def _required_order_side(value: OrderSide | None) -> OrderSide:
+    """Return the saved trade entry side or fail if execution bookkeeping broke."""
+    if value is None:
+        msg = "open_trade_entry_side is required when closing a trade"
+        raise ValueError(msg)
+    return value
 
 
 def _mark_to_market_pnl(
@@ -777,7 +827,9 @@ def _mark_to_market_pnl(
     """Calculate unrealized PnL for the open position using the last close."""
     if position == 0:
         return Decimal("0")
-    return (last_close - average_entry_price) * position
+    if position > 0:
+        return (last_close - average_entry_price) * position
+    return (average_entry_price - last_close) * abs(position)
 
 
 def _with_post_exit_max_favorable_pnl(
@@ -796,14 +848,22 @@ def _with_post_exit_max_favorable_pnl(
     annotated_trades: list[ClosedTrade] = []
     for trade in closed_trades:
         exit_local_date = trade.exited_at_utc.astimezone(zone).date()
-        future_same_session_highs = (
-            Decimal(str(bar.high))
+        future_same_session_prices = (
+            Decimal(str(bar.high if trade.entry_side == OrderSide.BUY else bar.low))
             for bar in bars
             if bar.timestamp_utc >= trade.exited_at_utc
             and bar.timestamp_utc.astimezone(zone).date() == exit_local_date
         )
-        max_future_high = max(future_same_session_highs, default=trade.exit_price)
-        post_exit_move = max(max_future_high - trade.exit_price, Decimal("0")) * trade.quantity
+        if trade.entry_side == OrderSide.BUY:
+            best_future_price = max(future_same_session_prices, default=trade.exit_price)
+            post_exit_move = (
+                max(best_future_price - trade.exit_price, Decimal("0")) * trade.quantity
+            )
+        else:
+            best_future_price = min(future_same_session_prices, default=trade.exit_price)
+            post_exit_move = (
+                max(trade.exit_price - best_future_price, Decimal("0")) * trade.quantity
+            )
         annotated_trades.append(
             replace(
                 trade,

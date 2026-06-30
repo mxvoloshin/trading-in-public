@@ -283,6 +283,76 @@ filter by itself. It says the next implementable candidate should approximate
 `trend_up` conditions from information available early enough in the session,
 then compare against the same execution-cost stress.
 
+### Symmetric Long/Short VWAP Pullback Candidate
+
+The first short-side research variant is available as
+`spy-vwap-pullback-long-short`:
+
+```sh
+uv run python -m trade_research_app backtest run \
+  --strategy spy-vwap-pullback-long-short \
+  --symbol SPY \
+  --timeframe 5Min \
+  --start 2025-06-28 \
+  --end 2026-06-27 \
+  --market XNYS \
+  --session regular
+```
+
+This variant preserves the original long setup and adds the bearish mirror:
+
+- short entries require price below VWAP, falling VWAP, price below the opening
+  range low, a retest near VWAP from below, and bearish trend resumption
+- short exits trigger on VWAP reclaim, short pullback-structure failure, or
+  end-of-day flat timing
+- the backtest runner still owns simulated fills, PnL, costs, and reporting
+
+Gross one-year result:
+
+| Metric | Value |
+| --- | ---: |
+| Closed trades | `439` |
+| Winning trades | `133` |
+| Losing trades | `306` |
+| Win rate | `30.30%` |
+| Profit factor | `1.1835` |
+| Expectancy / trade | `$0.1163984055` |
+| Realized PnL | `$51.0989` |
+| Total PnL | `$51.0989` |
+| Max realized drawdown | `-$25.9630` |
+
+Mild cost scenario (`1` bp one-way slippage and `$0.005/share` commission):
+
+| Metric | Value |
+| --- | ---: |
+| Closed trades | `439` |
+| Winning trades | `128` |
+| Losing trades | `311` |
+| Win rate | `29.16%` |
+| Profit factor | `0.9600` |
+| Expectancy / trade | `-$0.0294275155` |
+| Realized PnL | `-$12.91867929` |
+| Total PnL | `-$12.91867929` |
+| Total commissions | `$4.390` |
+| Total slippage cost | `$59.62757929` |
+| Total execution costs | `$64.01757929` |
+| Max realized drawdown | `-$34.74503443` |
+
+The short side does fix the obvious down-day problem. In the costed run,
+`trend_down` sessions improve from the long-only baseline's `-$49.77374811` to
+`$46.32176131`. The costed split is:
+
+| Regime tag | Closed trades | Win rate | Total PnL | Expectancy |
+| --- | ---: | ---: | ---: | ---: |
+| `trend_up` | `160` | `37.50%` | `$18.97873663` | `$0.1186` |
+| `trend_down` | `131` | `30.53%` | `$46.32176131` | `$0.3536` |
+| `chop_or_mixed` | `148` | `18.92%` | `-$78.21917723` | `-$0.5285` |
+
+The tradeoff is that the symmetric candidate adds many more trades, so chop and
+execution costs become the main damage centers. It is a better research result
+than the long-only baseline, but still not live-ready under the same cost
+assumption.
+
 Cost-stress reports can be generated with:
 
 ```sh
@@ -312,6 +382,18 @@ The stress report also carries the median same-session post-exit favorable move
 for each scenario. That keeps exit-quality context visible while comparing cost
 drag, but it still does not turn this baseline into a live candidate.
 
+The symmetric long/short stress grid shows a stronger but still fragile gross
+edge:
+
+| Scenario | Total PnL | Expectancy / trade | Profit factor | Cost drag from gross | Gross edge consumed |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `gross` | `$51.0989` | `$0.1163984055` | `1.1835` | `$0.0000` | `0.00x` |
+| `commission_only` | `$46.7089` | `$0.1063984055` | `1.1660` | `$4.3900` | `0.09x` |
+| `slippage_0_25bps` | `$36.1920051775` | `$0.0824419252` | `1.1253` | `$14.9068948225` | `0.29x` |
+| `slippage_0_5bps` | `$21.285110355` | `$0.0484854450` | `1.0711` | `$29.813789645` | `0.58x` |
+| `slippage_1bps` | `-$8.52867929` | `-$0.0194275155` | `0.9734` | `$59.62757929` | `1.17x` |
+| `slippage_1bps_commission` | `-$12.91867929` | `-$0.0294275155` | `0.9600` | `$64.01757929` | `1.25x` |
+
 Verdict: this first mechanical VWAP-pullback version is not live-ready. The
 gross edge is effectively flat before commissions, spread, slippage, missed
 fills, taxes, borrow/margin constraints, and operational risk. A one-share gross
@@ -321,10 +403,11 @@ commission turns the result into a `-$38.26795096` loss. The measured execution
 cost of about `$0.1461` per completed trade is far larger than the gross
 expectancy of about `$0.0084` per completed trade.
 
-The useful result is not "trade this." The useful result is that the first
-candidate can be expressed through shared strategy decisions and backtested over
-the trusted normalized cache with reusable diagnostics. Next research should add
-stricter regime filters before any paper/live validation.
+The useful result is not "trade this." The useful result is that both long-only
+and symmetric long/short candidates can be expressed through shared strategy
+decisions and backtested over the trusted normalized cache with reusable
+diagnostics. Next research should add stricter regime filters before any
+paper/live validation.
 
 ### Next Research Plan
 
@@ -343,9 +426,9 @@ strategy tuning:
    and simple walk-forward summaries.
 3. Add event-day tagging for scheduled macro days before mixing those sessions
    into ordinary-session results.
-4. Implement the first narrowed candidate, `trend-day-vwap-reclaim`, through the
-   existing strategy registry so it can be compared against
-   `spy-vwap-pullback` with identical execution semantics.
+4. Use the symmetric long/short result as a bridge into the first narrowed
+   candidate, `trend-day-vwap-reclaim`, so chop/mixed sessions are filtered
+   before adding more entries.
 
 Do not optimize a long list of parameters before these diagnostics exist. The
 current gross profit factor of `1.0140` is too close to flat, so broad parameter

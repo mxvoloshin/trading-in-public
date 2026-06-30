@@ -4,8 +4,10 @@ import json
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import ClassVar
 
 from pytest import CaptureFixture
+from trade_core import DecisionAction, StrategyDecision, StrategyDecisionId
 from trade_data import Bar, HistoricalBarsRequest, Instrument, LocalMarketDataStore
 from trade_data.sessions import MarketSessionConfig
 from trade_research_app.backtest import (
@@ -16,7 +18,7 @@ from trade_research_app.backtest import (
     session_regime_tags,
 )
 from trade_research_app.cli import main
-from trade_strategies import get_strategy
+from trade_strategies import StrategyDecisionContext, get_strategy
 
 
 def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -> None:
@@ -295,6 +297,27 @@ def test_minimal_backtest_applies_one_way_slippage(tmp_path: Path) -> None:
     assert summary.total_pnl == Decimal("-3.020")
 
 
+def test_minimal_backtest_realizes_short_trade_pnl(tmp_path: Path) -> None:
+    request = _request()
+    _save_sample_bars(tmp_path, request)
+
+    summary = run_minimal_backtest(
+        request=request,
+        cache_dir=tmp_path,
+        output_path=None,
+        strategy=_ScriptedShortStrategy(),
+        quantity=Decimal("1"),
+    )
+
+    assert summary.fills == 2
+    assert summary.ending_position == Decimal("0")
+    assert summary.realized_pnl == Decimal("1.0")
+    assert summary.total_pnl == Decimal("1.0")
+    assert summary.winning_trades == 1
+    assert summary.profit_factor == Decimal("0")
+    assert summary.exit_reason_breakdown["scripted_short_exit"]["total_pnl"] == "1.0"
+
+
 def test_minimal_backtest_reports_trade_breakdowns(tmp_path: Path) -> None:
     request = _request()
     _save_sample_bars(tmp_path, request)
@@ -422,3 +445,34 @@ def _bar_at(
         volume=volume,
         session="regular",
     )
+
+
+class _ScriptedShortStrategy:
+    name: ClassVar[str] = "scripted-short"
+
+    def decide(
+        self,
+        *,
+        bar: Bar,
+        context: StrategyDecisionContext,
+    ) -> StrategyDecision:
+        action = DecisionAction.HOLD
+        reason = "scripted_hold"
+        if context.sequence_number == 2 and context.position_quantity == 0:
+            action = DecisionAction.ENTER_SHORT
+            reason = "scripted_short_entry"
+        elif context.sequence_number == 4 and context.position_quantity < 0:
+            action = DecisionAction.EXIT_SHORT
+            reason = "scripted_short_exit"
+
+        return StrategyDecision(
+            strategy_run_id=context.strategy_run_id,
+            strategy_name=self.name,
+            action=action,
+            input_refs=(context.input_ref,),
+            reason=f"{reason}:{bar.instrument_id}",
+            decided_at_utc=context.input_ref.observed_at_utc,
+            strategy_decision_id=StrategyDecisionId(
+                f"{context.strategy_run_id.value}-strategy-decision-{context.sequence_number:04d}"
+            ),
+        )
