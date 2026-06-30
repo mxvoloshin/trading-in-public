@@ -24,6 +24,8 @@ class StrategyDecisionContext:
         position_quantity: Current simulated position owned by the runner. The
             strategy may use it to decide enter versus exit, but it must not
             mutate position or calculate fills.
+        average_entry_price: Current runner-owned average entry price for the
+            open position, or zero when flat.
     """
 
     strategy_run_id: StrategyRunId
@@ -31,6 +33,7 @@ class StrategyDecisionContext:
     sequence_number: int
     previous_bar: Bar | None
     position_quantity: Decimal
+    average_entry_price: Decimal = Decimal("0")
 
 
 class Strategy(Protocol):

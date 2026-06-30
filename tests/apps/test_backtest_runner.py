@@ -123,13 +123,22 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
             "second_half": expected_empty_trade_bucket,
         },
         "daily_breakdown": {"2026-06-26": expected_trade_bucket},
+        "daily_trend_breakdown": {"daily_context_not_ready": expected_trade_bucket},
         "day_contribution_breakdown": expected_day_contribution,
         "decisions": 5,
         "ending_position": "0",
         "exit_reason_breakdown": {"close_below_previous_close": expected_trade_bucket},
         "expectancy_per_day": "-1.0",
         "expectancy_per_trade": "-1.0",
+        "entry_time_regime_breakdown": {"unclear": expected_trade_bucket},
+        "entry_time_regime_side_breakdown": {"long:unclear": expected_trade_bucket},
         "fills": 2,
+        "full_session_diagnostic_regime_breakdown": {
+            "chop_or_mixed_diagnostic": expected_trade_bucket
+        },
+        "full_session_diagnostic_regime_side_breakdown": {
+            "long:chop_or_mixed_diagnostic": expected_trade_bucket
+        },
         "gap_breakdown": {"unknown_gap": expected_trade_bucket},
         "holding_time_breakdown": {"00-30m": expected_trade_bucket},
         "instrument_id": "SPY.US",
@@ -149,6 +158,7 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
         },
         "macro_event_type_breakdown": {"ordinary_session": expected_trade_bucket},
         "opening_range_breakdown": {"unknown_opening_range": expected_trade_bucket},
+        "opening_drive_return_breakdown": {"unknown_opening_drive_return": expected_trade_bucket},
         "opening_drive_close_position_breakdown": {"unknown_opening_drive": expected_trade_bucket},
         "pending_orders": 0,
         "profit_factor": "0",
@@ -158,7 +168,12 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
             "long": expected_trade_bucket,
             "short": expected_empty_trade_bucket,
         },
+        "signal_bar_body_pct_breakdown": {"0.80-1.00": expected_trade_bucket},
+        "signal_bar_close_location_breakdown": {"0.80-1.00": expected_trade_bucket},
         "vwap_distance_atr_breakdown": {"unknown_vwap_distance_atr": expected_trade_bucket},
+        "vwap_opening_range_confluence_breakdown": {
+            "unknown_vwap_opening_range_confluence": expected_trade_bucket
+        },
         "rolling_3_month_breakdown": {
             "2026-06-01_2026-08-30": expected_trade_bucket,
         },
@@ -234,6 +249,29 @@ def test_backtest_cli_runs_against_local_cache(
     assert "average_post_exit_max_favorable_pnl=0.0" in output
     assert "median_post_exit_max_favorable_pnl=0.0" in output
     assert "max_post_exit_max_favorable_pnl=0.0" in output
+
+
+def test_minimal_backtest_uses_signal_break_entry_reference_price(tmp_path: Path) -> None:
+    request = _request()
+    session_config = MarketSessionConfig.xnys_regular()
+    bars = (
+        _bar_at(day=26, hour=13, minute=30, open=100.0, close=100.0, volume=1_000),
+        _bar_at(day=26, hour=13, minute=35, open=100.0, close=100.0, volume=1_000),
+        _bar_at(day=26, hour=13, minute=40, open=103.0, close=103.0, volume=1_000),
+        _bar_at(day=26, hour=13, minute=45, open=104.0, close=104.0, volume=1_000),
+    )
+    LocalMarketDataStore(tmp_path).save_normalized_bars(bars, request, session_config)
+
+    summary = run_minimal_backtest(
+        request=request,
+        cache_dir=tmp_path,
+        output_path=None,
+        strategy=_ScriptedBreakEntryStrategy(),
+        quantity=Decimal("1"),
+    )
+
+    assert summary.closed_trades == 1
+    assert summary.total_pnl == Decimal("2.5")
 
 
 def test_default_cost_stress_scenarios_cover_slippage_and_commissions() -> None:
@@ -465,13 +503,30 @@ def test_minimal_backtest_reports_trade_breakdowns(tmp_path: Path) -> None:
     assert summary.holding_time_breakdown == {"00-30m": expected_trade_bucket}
     assert summary.gap_breakdown == {"unknown_gap": expected_trade_bucket}
     assert summary.opening_range_breakdown == {"unknown_opening_range": expected_trade_bucket}
+    assert summary.opening_drive_return_breakdown == {
+        "unknown_opening_drive_return": expected_trade_bucket
+    }
     assert summary.opening_drive_close_position_breakdown == {
         "unknown_opening_drive": expected_trade_bucket
     }
+    assert summary.daily_trend_breakdown == {"daily_context_not_ready": expected_trade_bucket}
     assert summary.trend_breakdown == {"chop_or_mixed": expected_trade_bucket}
     assert summary.relative_volume_breakdown == {"unknown_relative_volume": expected_trade_bucket}
     assert summary.vwap_distance_atr_breakdown == {
         "unknown_vwap_distance_atr": expected_trade_bucket
+    }
+    assert summary.vwap_opening_range_confluence_breakdown == {
+        "unknown_vwap_opening_range_confluence": expected_trade_bucket
+    }
+    assert summary.signal_bar_close_location_breakdown == {"0.80-1.00": expected_trade_bucket}
+    assert summary.signal_bar_body_pct_breakdown == {"0.80-1.00": expected_trade_bucket}
+    assert summary.entry_time_regime_breakdown == {"unclear": expected_trade_bucket}
+    assert summary.entry_time_regime_side_breakdown == {"long:unclear": expected_trade_bucket}
+    assert summary.full_session_diagnostic_regime_breakdown == {
+        "chop_or_mixed_diagnostic": expected_trade_bucket
+    }
+    assert summary.full_session_diagnostic_regime_side_breakdown == {
+        "long:chop_or_mixed_diagnostic": expected_trade_bucket
     }
 
 
@@ -539,14 +594,14 @@ def test_session_regime_tags_bucket_gap_opening_range_trend_and_volume() -> None
     bars = (
         *[
             opening_bar
-            for day in range(1, 21)
+            for day in range(1, 26)
             for opening_bar in [
                 _bar_at(
                     day=day,
                     hour=13,
                     minute=30 + offset,
-                    open=100.0,
-                    close=100.0,
+                    open=75.0 + day,
+                    close=75.0 + day,
                     volume=100,
                 )
                 for offset in range(0, 30, 5)
@@ -566,7 +621,9 @@ def test_session_regime_tags_bucket_gap_opening_range_trend_and_volume() -> None
     assert tags["2026-06-01"].relative_volume_bucket == "insufficient_rvol_history"
     assert tags["2026-06-29"].gap_bucket == "large_gap_up"
     assert tags["2026-06-29"].opening_range_state == "above_opening_range"
+    assert tags["2026-06-29"].opening_drive_return_bucket == "0% to +0.20%"
     assert tags["2026-06-29"].opening_drive_close_position_bucket == "0.40-0.60"
+    assert tags["2026-06-29"].daily_trend_state == "bullish_daily_context"
     assert tags["2026-06-29"].trend_state == "trend_up"
     assert tags["2026-06-29"].relative_volume_bucket == "event_like"
 
@@ -686,6 +743,37 @@ class _ScriptedShortStrategy:
         elif context.sequence_number == 4 and context.position_quantity < 0:
             action = DecisionAction.EXIT_SHORT
             reason = "scripted_short_exit"
+
+        return StrategyDecision(
+            strategy_run_id=context.strategy_run_id,
+            strategy_name=self.name,
+            action=action,
+            input_refs=(context.input_ref,),
+            reason=f"{reason}:{bar.instrument_id}",
+            decided_at_utc=context.input_ref.observed_at_utc,
+            strategy_decision_id=StrategyDecisionId(
+                f"{context.strategy_run_id.value}-strategy-decision-{context.sequence_number:04d}"
+            ),
+        )
+
+
+class _ScriptedBreakEntryStrategy:
+    name: ClassVar[str] = "scripted-break-entry"
+
+    def decide(
+        self,
+        *,
+        bar: Bar,
+        context: StrategyDecisionContext,
+    ) -> StrategyDecision:
+        action = DecisionAction.HOLD
+        reason = "scripted_hold"
+        if context.sequence_number == 2 and context.position_quantity == 0:
+            action = DecisionAction.ENTER_LONG
+            reason = "long_signal_bar_break_entry@101.5"
+        elif context.sequence_number == 3 and context.position_quantity > 0:
+            action = DecisionAction.EXIT_LONG
+            reason = "scripted_break_exit"
 
         return StrategyDecision(
             strategy_run_id=context.strategy_run_id,

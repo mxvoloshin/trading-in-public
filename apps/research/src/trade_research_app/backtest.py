@@ -73,10 +73,18 @@ class ClosedTrade:
             trade's original direction, measured from the simulated exit fill price.
         gap_bucket: Session gap bucket derived from prior regular-session close.
         opening_range_state: Session state after the first 30 minutes.
+        opening_drive_return_bucket: First-30-minute return bucket.
         opening_drive_close_position_bucket: First-30-minute close location bucket.
+        daily_trend_state: Completed-daily SMA context known before session open.
         trend_state: Full-session VWAP/close trend proxy.
         relative_volume_bucket: Opening-window volume versus trailing-session baseline.
         vwap_distance_atr_bucket: Signal-bar close distance above VWAP in ATR units.
+        vwap_opening_range_confluence_bucket: Side-aware VWAP-to-opening-range distance bucket.
+        signal_bar_close_location_bucket: Signal-bar close location bucket.
+        signal_bar_body_pct_bucket: Signal-bar body size versus range bucket.
+        entry_time_regime_label: Entry-time regime label calculated without future bars.
+        full_session_diagnostic_regime_label: Full-session diagnostic regime label. This may use
+            future bars and must not be used as a strategy input.
         macro_event_labels: Reporting-only scheduled macro event labels for the
             market-local exit date.
         pnl: Net realized PnL after entry/exit commissions and slippage.
@@ -91,10 +99,17 @@ class ClosedTrade:
     post_exit_max_favorable_pnl: Decimal
     gap_bucket: str
     opening_range_state: str
+    opening_drive_return_bucket: str
     opening_drive_close_position_bucket: str
+    daily_trend_state: str
     trend_state: str
     relative_volume_bucket: str
     vwap_distance_atr_bucket: str
+    vwap_opening_range_confluence_bucket: str
+    signal_bar_close_location_bucket: str
+    signal_bar_body_pct_bucket: str
+    entry_time_regime_label: str
+    full_session_diagnostic_regime_label: str
     macro_event_labels: tuple[str, ...]
     pnl: Decimal
 
@@ -262,10 +277,19 @@ class BacktestSummary:
     holding_time_breakdown: dict[str, dict[str, str | int]]
     gap_breakdown: dict[str, dict[str, str | int]]
     opening_range_breakdown: dict[str, dict[str, str | int]]
+    opening_drive_return_breakdown: dict[str, dict[str, str | int]]
     opening_drive_close_position_breakdown: dict[str, dict[str, str | int]]
+    daily_trend_breakdown: dict[str, dict[str, str | int]]
     trend_breakdown: dict[str, dict[str, str | int]]
     relative_volume_breakdown: dict[str, dict[str, str | int]]
     vwap_distance_atr_breakdown: dict[str, dict[str, str | int]]
+    vwap_opening_range_confluence_breakdown: dict[str, dict[str, str | int]]
+    signal_bar_close_location_breakdown: dict[str, dict[str, str | int]]
+    signal_bar_body_pct_breakdown: dict[str, dict[str, str | int]]
+    entry_time_regime_breakdown: dict[str, dict[str, str | int]]
+    entry_time_regime_side_breakdown: dict[str, dict[str, str | int]]
+    full_session_diagnostic_regime_breakdown: dict[str, dict[str, str | int]]
+    full_session_diagnostic_regime_side_breakdown: dict[str, dict[str, str | int]]
     macro_event_day_breakdown: dict[str, dict[str, str | int]]
     macro_event_type_breakdown: dict[str, dict[str, str | int]]
     trade_contribution_breakdown: dict[str, dict[str, str | int]]
@@ -326,10 +350,25 @@ class BacktestSummary:
             "holding_time_breakdown": self.holding_time_breakdown,
             "gap_breakdown": self.gap_breakdown,
             "opening_range_breakdown": self.opening_range_breakdown,
+            "opening_drive_return_breakdown": self.opening_drive_return_breakdown,
             "opening_drive_close_position_breakdown": (self.opening_drive_close_position_breakdown),
+            "daily_trend_breakdown": self.daily_trend_breakdown,
             "trend_breakdown": self.trend_breakdown,
             "relative_volume_breakdown": self.relative_volume_breakdown,
             "vwap_distance_atr_breakdown": self.vwap_distance_atr_breakdown,
+            "vwap_opening_range_confluence_breakdown": (
+                self.vwap_opening_range_confluence_breakdown
+            ),
+            "signal_bar_close_location_breakdown": self.signal_bar_close_location_breakdown,
+            "signal_bar_body_pct_breakdown": self.signal_bar_body_pct_breakdown,
+            "entry_time_regime_breakdown": self.entry_time_regime_breakdown,
+            "entry_time_regime_side_breakdown": self.entry_time_regime_side_breakdown,
+            "full_session_diagnostic_regime_breakdown": (
+                self.full_session_diagnostic_regime_breakdown
+            ),
+            "full_session_diagnostic_regime_side_breakdown": (
+                self.full_session_diagnostic_regime_side_breakdown
+            ),
             "macro_event_day_breakdown": self.macro_event_day_breakdown,
             "macro_event_type_breakdown": self.macro_event_type_breakdown,
             "trade_contribution_breakdown": self.trade_contribution_breakdown,
@@ -433,10 +472,21 @@ def run_minimal_backtest(
                         post_exit_max_favorable_pnl=Decimal("0"),
                         gap_bucket="unknown_gap",
                         opening_range_state="unknown_opening_range",
+                        opening_drive_return_bucket="unknown_opening_drive_return",
                         opening_drive_close_position_bucket="unknown_opening_drive",
+                        daily_trend_state="unknown_daily_trend",
                         trend_state="unknown_trend",
                         relative_volume_bucket="unknown_relative_volume",
                         vwap_distance_atr_bucket="unknown_vwap_distance_atr",
+                        vwap_opening_range_confluence_bucket=(
+                            "unknown_vwap_opening_range_confluence"
+                        ),
+                        signal_bar_close_location_bucket="unknown_signal_bar_close_location",
+                        signal_bar_body_pct_bucket="unknown_signal_bar_body_pct",
+                        entry_time_regime_label="unknown_entry_time_regime",
+                        full_session_diagnostic_regime_label=(
+                            "unknown_full_session_diagnostic_regime"
+                        ),
                         macro_event_labels=(),
                         pnl=trade_pnl,
                     )
@@ -470,6 +520,7 @@ def run_minimal_backtest(
                 sequence_number=sequence_number,
                 previous_bar=previous_bar,
                 position_quantity=position,
+                average_entry_price=average_entry_price,
             ),
         )
         decisions += 1
@@ -508,6 +559,73 @@ def run_minimal_backtest(
                 f"{strategy_run_id.value}-order-intent-{sequence_number:04d}"
             ),
         )
+        explicit_reference_price = _explicit_decision_reference_price(decision.reason)
+        if explicit_reference_price is not None:
+            fill = _simulate_next_open_fill(
+                order_intent=order_intent,
+                filled_at_utc=bar.timestamp_utc,
+                reference_price=explicit_reference_price,
+                cost_model=cost_model,
+            )
+            fills.append(fill)
+            total_commissions += fill.commission
+            total_slippage_cost += fill.slippage_cost
+            previous_position = position
+            trade_pnl = _closed_trade_pnl(
+                fill=fill,
+                position=position,
+                average_entry_price=average_entry_price,
+                open_trade_commissions=open_trade_commissions,
+            )
+            position, average_entry_price, realized_pnl = _apply_fill(
+                fill=fill,
+                position=position,
+                average_entry_price=average_entry_price,
+                realized_pnl=realized_pnl,
+            )
+            if trade_pnl is not None:
+                if open_trade_entered_at_utc is None:
+                    msg = "closing fill encountered without an opening fill timestamp"
+                    raise ValueError(msg)
+                closed_trades.append(
+                    ClosedTrade(
+                        entered_at_utc=open_trade_entered_at_utc,
+                        exited_at_utc=fill.filled_at_utc,
+                        exit_reason=_decision_rule_reason(decision.reason),
+                        exit_price=fill.price,
+                        quantity=fill.quantity,
+                        entry_side=_required_order_side(open_trade_entry_side),
+                        post_exit_max_favorable_pnl=Decimal("0"),
+                        gap_bucket="unknown_gap",
+                        opening_range_state="unknown_opening_range",
+                        opening_drive_return_bucket="unknown_opening_drive_return",
+                        opening_drive_close_position_bucket="unknown_opening_drive",
+                        daily_trend_state="unknown_daily_trend",
+                        trend_state="unknown_trend",
+                        relative_volume_bucket="unknown_relative_volume",
+                        vwap_distance_atr_bucket="unknown_vwap_distance_atr",
+                        vwap_opening_range_confluence_bucket=(
+                            "unknown_vwap_opening_range_confluence"
+                        ),
+                        signal_bar_close_location_bucket="unknown_signal_bar_close_location",
+                        signal_bar_body_pct_bucket="unknown_signal_bar_body_pct",
+                        entry_time_regime_label="unknown_entry_time_regime",
+                        full_session_diagnostic_regime_label=(
+                            "unknown_full_session_diagnostic_regime"
+                        ),
+                        macro_event_labels=(),
+                        pnl=trade_pnl,
+                    )
+                )
+            if _is_opening_fill(fill=fill, previous_position=previous_position):
+                open_trade_commissions += fill.commission
+                open_trade_entered_at_utc = fill.filled_at_utc
+                open_trade_entry_side = fill.side
+            elif trade_pnl is not None:
+                open_trade_commissions = Decimal("0")
+                open_trade_entered_at_utc = None
+                open_trade_entry_side = None
+            continue
         pending_order_intent = order_intent
         if decision.action in (DecisionAction.EXIT_LONG, DecisionAction.EXIT_SHORT):
             pending_exit_reason = _decision_rule_reason(decision.reason)
@@ -525,6 +643,21 @@ def run_minimal_backtest(
         timezone=session_config.timezone,
     )
     closed_trades = _with_vwap_distance_atr_tags(
+        closed_trades,
+        bars=bars,
+        timezone=session_config.timezone,
+    )
+    closed_trades = _with_vwap_opening_range_confluence_tags(
+        closed_trades,
+        bars=bars,
+        timezone=session_config.timezone,
+    )
+    closed_trades = _with_signal_bar_quality_tags(
+        closed_trades,
+        bars=bars,
+        timezone=session_config.timezone,
+    )
+    closed_trades = _with_entry_time_regime_tags(
         closed_trades,
         bars=bars,
         timezone=session_config.timezone,
@@ -553,10 +686,15 @@ def run_minimal_backtest(
         closed_trades,
         tag_name="opening_range_state",
     )
+    opening_drive_return_breakdown = _regime_breakdown(
+        closed_trades,
+        tag_name="opening_drive_return_bucket",
+    )
     opening_drive_close_position_breakdown = _regime_breakdown(
         closed_trades,
         tag_name="opening_drive_close_position_bucket",
     )
+    daily_trend_breakdown = _regime_breakdown(closed_trades, tag_name="daily_trend_state")
     trend_breakdown = _regime_breakdown(closed_trades, tag_name="trend_state")
     relative_volume_breakdown = _regime_breakdown(
         closed_trades,
@@ -565,6 +703,34 @@ def run_minimal_backtest(
     vwap_distance_atr_breakdown = _regime_breakdown(
         closed_trades,
         tag_name="vwap_distance_atr_bucket",
+    )
+    vwap_opening_range_confluence_breakdown = _regime_breakdown(
+        closed_trades,
+        tag_name="vwap_opening_range_confluence_bucket",
+    )
+    signal_bar_close_location_breakdown = _regime_breakdown(
+        closed_trades,
+        tag_name="signal_bar_close_location_bucket",
+    )
+    signal_bar_body_pct_breakdown = _regime_breakdown(
+        closed_trades,
+        tag_name="signal_bar_body_pct_bucket",
+    )
+    entry_time_regime_breakdown = _regime_breakdown(
+        closed_trades,
+        tag_name="entry_time_regime_label",
+    )
+    entry_time_regime_side_breakdown = _side_regime_breakdown(
+        closed_trades,
+        tag_name="entry_time_regime_label",
+    )
+    full_session_diagnostic_regime_breakdown = _regime_breakdown(
+        closed_trades,
+        tag_name="full_session_diagnostic_regime_label",
+    )
+    full_session_diagnostic_regime_side_breakdown = _side_regime_breakdown(
+        closed_trades,
+        tag_name="full_session_diagnostic_regime_label",
     )
     macro_event_day_breakdown = _macro_event_day_breakdown(closed_trades)
     macro_event_type_breakdown = _macro_event_type_breakdown(closed_trades)
@@ -643,10 +809,21 @@ def run_minimal_backtest(
         holding_time_breakdown=holding_time_breakdown,
         gap_breakdown=gap_breakdown,
         opening_range_breakdown=opening_range_breakdown,
+        opening_drive_return_breakdown=opening_drive_return_breakdown,
         opening_drive_close_position_breakdown=opening_drive_close_position_breakdown,
+        daily_trend_breakdown=daily_trend_breakdown,
         trend_breakdown=trend_breakdown,
         relative_volume_breakdown=relative_volume_breakdown,
         vwap_distance_atr_breakdown=vwap_distance_atr_breakdown,
+        vwap_opening_range_confluence_breakdown=vwap_opening_range_confluence_breakdown,
+        signal_bar_close_location_breakdown=signal_bar_close_location_breakdown,
+        signal_bar_body_pct_breakdown=signal_bar_body_pct_breakdown,
+        entry_time_regime_breakdown=entry_time_regime_breakdown,
+        entry_time_regime_side_breakdown=entry_time_regime_side_breakdown,
+        full_session_diagnostic_regime_breakdown=full_session_diagnostic_regime_breakdown,
+        full_session_diagnostic_regime_side_breakdown=(
+            full_session_diagnostic_regime_side_breakdown
+        ),
         macro_event_day_breakdown=macro_event_day_breakdown,
         macro_event_type_breakdown=macro_event_type_breakdown,
         trade_contribution_breakdown=trade_contribution_breakdown,
@@ -972,8 +1149,11 @@ class SessionRegimeTags:
 
     gap_bucket: str
     opening_range_state: str
+    opening_drive_return_bucket: str
     opening_drive_close_position_bucket: str
+    daily_trend_state: str
     trend_state: str
+    full_session_diagnostic_regime_label: str
     relative_volume_bucket: str
 
 
@@ -998,8 +1178,11 @@ def _with_regime_tags(
             SessionRegimeTags(
                 gap_bucket="unknown_gap",
                 opening_range_state="unknown_opening_range",
+                opening_drive_return_bucket="unknown_opening_drive_return",
                 opening_drive_close_position_bucket="unknown_opening_drive",
+                daily_trend_state="unknown_daily_trend",
                 trend_state="unknown_trend",
+                full_session_diagnostic_regime_label="unknown_full_session_diagnostic_regime",
                 relative_volume_bucket="unknown_relative_volume",
             ),
         )
@@ -1008,8 +1191,11 @@ def _with_regime_tags(
                 trade,
                 gap_bucket=tags.gap_bucket,
                 opening_range_state=tags.opening_range_state,
+                opening_drive_return_bucket=tags.opening_drive_return_bucket,
                 opening_drive_close_position_bucket=tags.opening_drive_close_position_bucket,
+                daily_trend_state=tags.daily_trend_state,
                 trend_state=tags.trend_state,
+                full_session_diagnostic_regime_label=tags.full_session_diagnostic_regime_label,
                 relative_volume_bucket=tags.relative_volume_bucket,
             )
         )
@@ -1063,6 +1249,104 @@ def _with_vwap_distance_atr_tags(
     return tagged_trades
 
 
+def _with_vwap_opening_range_confluence_tags(
+    closed_trades: list[ClosedTrade],
+    *,
+    bars: Sequence[Bar],
+    timezone: str,
+) -> list[ClosedTrade]:
+    """Attach side-aware VWAP-to-opening-range confluence buckets to trades."""
+    zone = ZoneInfo(timezone)
+    session_bars = _bars_by_local_date(bars, timezone=timezone)
+    tagged_trades: list[ClosedTrade] = []
+    for trade in closed_trades:
+        entry_local_date = trade.entered_at_utc.astimezone(zone).date().isoformat()
+        bars_for_date = session_bars.get(entry_local_date, [])
+        signal_bars = [bar for bar in bars_for_date if bar.timestamp_utc < trade.entered_at_utc]
+        tagged_trades.append(
+            replace(
+                trade,
+                vwap_opening_range_confluence_bucket=_vwap_opening_range_confluence_bucket(
+                    signal_bars,
+                    side=trade.entry_side,
+                ),
+            )
+        )
+    return tagged_trades
+
+
+def _with_signal_bar_quality_tags(
+    closed_trades: list[ClosedTrade],
+    *,
+    bars: Sequence[Bar],
+    timezone: str,
+) -> list[ClosedTrade]:
+    """Attach signal-bar shape buckets to each completed trade."""
+    zone = ZoneInfo(timezone)
+    session_bars = _bars_by_local_date(bars, timezone=timezone)
+    tagged_trades: list[ClosedTrade] = []
+    for trade in closed_trades:
+        entry_local_date = trade.entered_at_utc.astimezone(zone).date().isoformat()
+        bars_for_date = session_bars.get(entry_local_date, [])
+        signal_bar = next(
+            (bar for bar in reversed(bars_for_date) if bar.timestamp_utc < trade.entered_at_utc),
+            None,
+        )
+        close_location_bucket, body_pct_bucket = _signal_bar_quality_buckets(signal_bar)
+        tagged_trades.append(
+            replace(
+                trade,
+                signal_bar_close_location_bucket=close_location_bucket,
+                signal_bar_body_pct_bucket=body_pct_bucket,
+            )
+        )
+    return tagged_trades
+
+
+def _signal_bar_quality_buckets(bar: Bar | None) -> tuple[str, str]:
+    """Return close-location and body-size buckets for one signal bar."""
+    if bar is None:
+        return "unknown_signal_bar_close_location", "unknown_signal_bar_body_pct"
+    high = Decimal(str(bar.high))
+    low = Decimal(str(bar.low))
+    signal_range = high - low
+    if signal_range == 0:
+        close_location = Decimal("0.50")
+        body_pct = Decimal("0")
+    else:
+        close = Decimal(str(bar.close))
+        open_price = Decimal(str(bar.open))
+        close_location = (close - low) / signal_range
+        body_pct = abs(close - open_price) / signal_range
+    return _zero_to_one_bucket(
+        close_location,
+        unknown_label="unknown_signal_bar_close_location",
+    ), _zero_to_one_bucket(body_pct, unknown_label="unknown_signal_bar_body_pct")
+
+
+def _with_entry_time_regime_tags(
+    closed_trades: list[ClosedTrade],
+    *,
+    bars: Sequence[Bar],
+    timezone: str,
+) -> list[ClosedTrade]:
+    """Attach entry-time regime labels calculated only from pre-entry bars."""
+    zone = ZoneInfo(timezone)
+    session_bars = _bars_by_local_date(bars, timezone=timezone)
+    tagged_trades: list[ClosedTrade] = []
+    for trade in closed_trades:
+        entry_local_date = trade.entered_at_utc.astimezone(zone).date().isoformat()
+        bars_for_date = session_bars.get(entry_local_date, [])
+        signal_bars = [bar for bar in bars_for_date if bar.timestamp_utc < trade.entered_at_utc]
+        tagged_trades.append(
+            replace(
+                trade,
+                entry_time_regime_label=_entry_time_regime_label(signal_bars),
+            )
+        )
+    return tagged_trades
+
+
 def session_regime_tags(
     bars: Sequence[Bar],
     *,
@@ -1072,6 +1356,7 @@ def session_regime_tags(
     zone = ZoneInfo(timezone)
     session_bars = _bars_by_local_date(bars, timezone=timezone)
     trailing_opening_volumes: list[Decimal] = []
+    completed_session_closes: list[Decimal] = []
     previous_close: Decimal | None = None
     tags_by_date: dict[str, SessionRegimeTags] = {}
 
@@ -1079,6 +1364,11 @@ def session_regime_tags(
         current_open = Decimal(str(bars_for_date[0].open))
         current_close = Decimal(str(bars_for_date[-1].close))
         opening_window_volume = _opening_window_volume(bars_for_date, zone=zone)
+        full_session_diagnostic_regime_label = _full_session_diagnostic_regime_label(
+            bars_for_date,
+            current_open=current_open,
+            current_close=current_close,
+        )
         tags_by_date[local_date] = SessionRegimeTags(
             gap_bucket=_gap_bucket(
                 current_open=current_open,
@@ -1088,21 +1378,28 @@ def session_regime_tags(
                 bars_for_date,
                 zone=zone,
             ),
+            opening_drive_return_bucket=_opening_drive_return_bucket(
+                bars_for_date,
+                zone=zone,
+            ),
             opening_drive_close_position_bucket=_opening_drive_close_position_bucket(
                 bars_for_date,
                 zone=zone,
             ),
+            daily_trend_state=_daily_trend_state(completed_session_closes),
             trend_state=_trend_state(
                 bars_for_date,
                 current_open=current_open,
                 current_close=current_close,
             ),
+            full_session_diagnostic_regime_label=full_session_diagnostic_regime_label,
             relative_volume_bucket=_relative_volume_bucket(
                 opening_window_volume=opening_window_volume,
                 trailing_opening_volumes=trailing_opening_volumes,
             ),
         )
         previous_close = current_close
+        completed_session_closes.append(current_close)
         if opening_window_volume is not None:
             trailing_opening_volumes.append(opening_window_volume)
 
@@ -1198,13 +1495,55 @@ def _opening_drive_close_position_bucket(
     else:
         close_position = (opening_close - opening_low) / (opening_high - opening_low)
 
-    if close_position < Decimal("0.40"):
-        return "0.00-0.40"
-    if close_position < Decimal("0.60"):
+    return _zero_to_one_bucket(close_position, unknown_label="unknown_opening_drive")
+
+
+def _zero_to_one_bucket(value: Decimal, *, unknown_label: str) -> str:
+    """Bucket a normalized 0-to-1 feature into 0.20-wide ranges."""
+    if value < 0 or value > 1:
+        return unknown_label
+    if value < Decimal("0.20"):
+        return "0.00-0.20"
+    if value < Decimal("0.40"):
+        return "0.20-0.40"
+    if value < Decimal("0.60"):
         return "0.40-0.60"
-    if close_position < Decimal("0.80"):
+    if value < Decimal("0.80"):
         return "0.60-0.80"
     return "0.80-1.00"
+
+
+def _opening_drive_return_bucket(
+    bars: Sequence[Bar],
+    *,
+    zone: ZoneInfo,
+) -> str:
+    """Bucket first-30-minute return using the research-plan thresholds."""
+    opening_bars = [
+        bar
+        for bar in bars
+        if bar.timestamp_utc.astimezone(zone).time().hour == 9
+        and bar.timestamp_utc.astimezone(zone).time().minute < 60
+    ][:6]
+    if len(opening_bars) < 6:
+        return "unknown_opening_drive_return"
+
+    opening_open = Decimal(str(opening_bars[0].open))
+    if opening_open == 0:
+        return "unknown_opening_drive_return"
+    opening_close = Decimal(str(opening_bars[-1].close))
+    return_pct = (opening_close - opening_open) / opening_open
+    if return_pct <= Decimal("-0.0050"):
+        return "<= -0.50%"
+    if return_pct < Decimal("-0.0020"):
+        return "-0.50% to -0.20%"
+    if return_pct < Decimal("0"):
+        return "-0.20% to 0%"
+    if return_pct <= Decimal("0.0020"):
+        return "0% to +0.20%"
+    if return_pct <= Decimal("0.0050"):
+        return "+0.20% to +0.50%"
+    return "> +0.50%"
 
 
 def _opening_window_volume(
@@ -1253,6 +1592,167 @@ def _trend_state(
     return "chop_or_mixed"
 
 
+def _entry_time_regime_label(signal_bars: Sequence[Bar]) -> str:
+    """Classify the entry-time setup using only completed bars before entry."""
+    if len(signal_bars) < 7:
+        return "unclear"
+    opening_bars = signal_bars[:6]
+    opening_open = Decimal(str(opening_bars[0].open))
+    if opening_open == 0:
+        return "unclear"
+    opening_high = max(Decimal(str(bar.high)) for bar in opening_bars)
+    opening_low = min(Decimal(str(bar.low)) for bar in opening_bars)
+    opening_mid = (opening_high + opening_low) / Decimal("2")
+    opening_close = Decimal(str(opening_bars[-1].close))
+    first_30m_return_pct = (opening_close - opening_open) / opening_open
+    opening_range_pct = (opening_high - opening_low) / opening_open
+
+    current_close = Decimal(str(signal_bars[-1].close))
+    current_vwap = _vwap(signal_bars)
+    previous_vwap = _vwap(signal_bars[:-1])
+    atr_5m_20 = _average_true_range(signal_bars, period=20)
+    if current_vwap is None or previous_vwap is None:
+        return "unclear"
+    vwap_slope = current_vwap - previous_vwap
+
+    if opening_range_pct >= Decimal("0.0120"):
+        return "event_like_high_volatility"
+    if (
+        first_30m_return_pct >= 0
+        and current_close > current_vwap
+        and current_close > opening_high
+        and vwap_slope > 0
+    ):
+        return "bullish_trend_candidate"
+    if (
+        first_30m_return_pct <= 0
+        and current_close < current_vwap
+        and current_close < opening_low
+        and vwap_slope < 0
+    ):
+        return "bearish_trend_candidate"
+
+    crossed_vwap_count = _vwap_cross_count(signal_bars)
+    near_mid = (
+        atr_5m_20 is not None
+        and atr_5m_20 > 0
+        and abs(current_close - opening_mid) <= Decimal("0.50") * atr_5m_20
+    )
+    if (
+        abs(vwap_slope) <= _small_vwap_slope_threshold(signal_bars)
+        and crossed_vwap_count >= 2
+        and (opening_low <= current_close <= opening_high or near_mid)
+    ):
+        return "range_candidate"
+    return "unclear"
+
+
+def _full_session_diagnostic_regime_label(
+    bars: Sequence[Bar],
+    *,
+    current_open: Decimal,
+    current_close: Decimal,
+) -> str:
+    """Classify the full completed session for diagnostics only."""
+    session_high = max(Decimal(str(bar.high)) for bar in bars)
+    session_low = min(Decimal(str(bar.low)) for bar in bars)
+    session_range = session_high - session_low
+    session_vwap = _vwap(bars)
+    if session_range == 0 or session_vwap is None:
+        return "chop_or_mixed_diagnostic"
+
+    close_location = (current_close - session_low) / session_range
+    bars_above_vwap = sum(1 for bar in bars if Decimal(str(bar.close)) > session_vwap)
+    above_vwap_share = Decimal(bars_above_vwap) / Decimal(len(bars))
+    if (
+        current_close > current_open
+        and close_location >= Decimal("0.65")
+        and above_vwap_share > Decimal("0.55")
+    ):
+        return "trend_up_diagnostic"
+    if (
+        current_close < current_open
+        and close_location <= Decimal("0.35")
+        and above_vwap_share < Decimal("0.45")
+    ):
+        return "trend_down_diagnostic"
+    if session_range / current_open >= Decimal("0.0180") and Decimal(
+        "0.35"
+    ) < close_location < Decimal("0.65"):
+        return "high_volatility_reversal_diagnostic"
+    return "chop_or_mixed_diagnostic"
+
+
+def _vwap_cross_count(bars: Sequence[Bar]) -> int:
+    """Count completed-bar close crossings around the running session VWAP."""
+    previous_side: int | None = None
+    crosses = 0
+    for index in range(1, len(bars) + 1):
+        running_vwap = _vwap(bars[:index])
+        if running_vwap is None:
+            continue
+        close = Decimal(str(bars[index - 1].close))
+        side = 1 if close > running_vwap else -1 if close < running_vwap else 0
+        if side == 0:
+            continue
+        if previous_side is not None and side != previous_side:
+            crosses += 1
+        previous_side = side
+    return crosses
+
+
+def _small_vwap_slope_threshold(bars: Sequence[Bar]) -> Decimal:
+    """Return a small-slope threshold from current ATR when available."""
+    atr_5m_20 = _average_true_range(bars, period=20)
+    if atr_5m_20 is None:
+        return Decimal("0.02")
+    return Decimal("0.10") * atr_5m_20
+
+
+def _daily_trend_state(
+    completed_session_closes: Sequence[Decimal],
+    *,
+    sma_period: int = 20,
+    slope_lookback_sessions: int = 5,
+) -> str:
+    """Classify completed-daily trend context without using today's close."""
+    required_closes = sma_period + slope_lookback_sessions
+    if len(completed_session_closes) < required_closes:
+        return "daily_context_not_ready"
+
+    prior_regular_session_close = completed_session_closes[-1]
+    daily_sma = _sma(
+        values=completed_session_closes,
+        period=sma_period,
+        end_offset=0,
+    )
+    daily_sma_lookback = _sma(
+        values=completed_session_closes,
+        period=sma_period,
+        end_offset=slope_lookback_sessions,
+    )
+    daily_sma_slope = daily_sma - daily_sma_lookback
+
+    if prior_regular_session_close > daily_sma and daily_sma_slope >= 0:
+        return "bullish_daily_context"
+    if prior_regular_session_close < daily_sma and daily_sma_slope <= 0:
+        return "bearish_daily_context"
+    return "neutral_daily_context"
+
+
+def _sma(
+    *,
+    values: Sequence[Decimal],
+    period: int,
+    end_offset: int,
+) -> Decimal:
+    """Calculate a simple moving average over a completed-value window."""
+    end_index = len(values) - end_offset
+    start_index = end_index - period
+    window = values[start_index:end_index]
+    return sum(window, Decimal("0")) / Decimal(period)
+
+
 def _vwap(bars: Sequence[Bar]) -> Decimal | None:
     """Calculate VWAP from typical price and bar volume."""
     total_volume = sum((Decimal(bar.volume) for bar in bars), Decimal("0"))
@@ -1297,7 +1797,7 @@ def _average_true_range(
 
 
 def _vwap_distance_atr_bucket(signal_bars: Sequence[Bar]) -> str:
-    """Bucket signal-bar close distance above VWAP in 20-bar ATR units."""
+    """Bucket absolute signal-bar close distance from VWAP in 20-bar ATR units."""
     if not signal_bars:
         return "unknown_vwap_distance_atr"
     session_vwap = _vwap(signal_bars)
@@ -1305,9 +1805,7 @@ def _vwap_distance_atr_bucket(signal_bars: Sequence[Bar]) -> str:
     if session_vwap is None or atr_5m_20 is None or atr_5m_20 == 0:
         return "unknown_vwap_distance_atr"
     signal_close = Decimal(str(signal_bars[-1].close))
-    distance_atr = (signal_close - session_vwap) / atr_5m_20
-    if distance_atr < 0:
-        return "below_vwap"
+    distance_atr = abs(signal_close - session_vwap) / atr_5m_20
     if distance_atr < Decimal("0.50"):
         return "0.00-0.50_atr"
     if distance_atr < Decimal("1.00"):
@@ -1315,6 +1813,34 @@ def _vwap_distance_atr_bucket(signal_bars: Sequence[Bar]) -> str:
     if distance_atr < Decimal("1.50"):
         return "1.00-1.50_atr"
     return "over_1.50_atr"
+
+
+def _vwap_opening_range_confluence_bucket(
+    signal_bars: Sequence[Bar],
+    *,
+    side: OrderSide,
+) -> str:
+    """Bucket side-aware VWAP distance to opening-range structure in ATR units."""
+    if len(signal_bars) < 6:
+        return "unknown_vwap_opening_range_confluence"
+    session_vwap = _vwap(signal_bars)
+    atr_5m_20 = _average_true_range(signal_bars, period=20)
+    if session_vwap is None or atr_5m_20 is None or atr_5m_20 == 0:
+        return "unknown_vwap_opening_range_confluence"
+
+    opening_bars = signal_bars[:6]
+    if side == OrderSide.BUY:
+        opening_level = max(Decimal(str(bar.high)) for bar in opening_bars)
+    else:
+        opening_level = min(Decimal(str(bar.low)) for bar in opening_bars)
+    distance_atr = abs(session_vwap - opening_level) / atr_5m_20
+    if distance_atr < Decimal("0.25"):
+        return "0.00-0.25_atr"
+    if distance_atr < Decimal("0.50"):
+        return "0.25-0.50_atr"
+    if distance_atr < Decimal("1.00"):
+        return "0.50-1.00_atr"
+    return "over_1.00_atr"
 
 
 def _relative_volume_bucket(
@@ -1526,6 +2052,19 @@ def _side_breakdown(closed_trades: list[ClosedTrade]) -> dict[str, dict[str, str
     for trade in closed_trades:
         bucket = "long" if trade.entry_side == OrderSide.BUY else "short"
         buckets[bucket].append(trade)
+    return {bucket: _trade_bucket_summary(trades) for bucket, trades in sorted(buckets.items())}
+
+
+def _side_regime_breakdown(
+    closed_trades: list[ClosedTrade],
+    *,
+    tag_name: str,
+) -> dict[str, dict[str, str | int]]:
+    """Group completed trades by side and one reporting-only regime tag."""
+    buckets: dict[str, list[ClosedTrade]] = {}
+    for trade in closed_trades:
+        side = "long" if trade.entry_side == OrderSide.BUY else "short"
+        buckets.setdefault(f"{side}:{getattr(trade, tag_name)}", []).append(trade)
     return {bucket: _trade_bucket_summary(trades) for bucket, trades in sorted(buckets.items())}
 
 
@@ -1779,6 +2318,15 @@ def _trade_bucket_summary(trades: list[ClosedTrade]) -> dict[str, str | int]:
 def _decision_rule_reason(reason: str) -> str:
     """Strip instrument tagging from a strategy reason for report grouping."""
     return reason.split(":", maxsplit=1)[0]
+
+
+def _explicit_decision_reference_price(reason: str) -> Decimal | None:
+    """Extract an explicit same-bar fill reference price from a decision reason."""
+    rule_reason = _decision_rule_reason(reason)
+    if "@" not in rule_reason:
+        return None
+    _, reference_price = rule_reason.rsplit("@", maxsplit=1)
+    return Decimal(reference_price)
 
 
 def _bar_close_time(timeframe: str, timestamp_utc: datetime) -> datetime:

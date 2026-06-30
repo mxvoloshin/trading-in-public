@@ -204,7 +204,7 @@ regime_label_full_session_diagnostic
 
 ## 000 - Create New Long/Short VWAP Trend-Continuation Base Strategy
 
-Status: [ ]
+Status: [x]
 
 ### Goal
 
@@ -350,15 +350,15 @@ Apply transaction costs to every entry and exit.
 
 ### Definition of Done
 
-- [ ] New strategy exists.
-- [ ] Strategy supports long and short trades.
-- [ ] VWAP resets each session.
-- [ ] Opening range is calculated correctly.
-- [ ] No lookahead bias exists.
-- [ ] Cost model is applied.
-- [ ] Reports show combined, long-only, and short-only results.
-- [ ] Trade-level features are exported.
-- [ ] This strategy becomes the baseline for all later issues.
+- [x] New strategy exists.
+- [x] Strategy supports long and short trades.
+- [x] VWAP resets each session.
+- [x] Opening range is calculated correctly.
+- [x] No lookahead bias exists.
+- [x] Cost model is applied.
+- [x] Reports show combined, long-only, and short-only results.
+- [x] Trade-level features are exported.
+- [x] This strategy becomes the baseline for all later issues.
 
 ## Result
 
@@ -382,7 +382,7 @@ Summary:
 
 ## 001 - Add Daily Trend Context Filter
 
-Status: [ ]
+Status: [x]
 
 ### Goal
 
@@ -468,12 +468,12 @@ Trade count by daily_trend_state and side
 
 ### Definition of Done
 
-- [ ] Daily SMA is calculated without lookahead.
-- [ ] Daily trend state is exported on every trade.
-- [ ] Filter can be toggled on/off.
-- [ ] Base vs filtered comparison is produced.
-- [ ] Long and short results are reported separately.
-- [ ] Decision is recorded: keep, reject, or diagnostic-only.
+- [x] Daily SMA is calculated without lookahead.
+- [x] Daily trend state is exported on every trade.
+- [x] Filter can be toggled on/off.
+- [x] Base vs filtered comparison is produced.
+- [x] Long and short results are reported separately.
+- [x] Decision is recorded: keep, reject, or diagnostic-only.
 
 ### Kill Conditions
 
@@ -487,11 +487,31 @@ worst rolling 6-month result does not improve
 one side improves only because the other side barely trades
 ```
 
+## Result
+
+Status: implemented locally
+Decision: diagnostic-only
+
+Summary:
+- Trades: 38
+- Long trades: 31
+- Short trades: 7
+- Costed PnL: -$0.04435306
+- Profit factor: 0.9980059124828458036257496575
+- Expectancy: -$0.001167185789473684210526315789/trade
+- Max DD: -$7.54180756
+- Worst 6mo: -$5.54794006
+- Long PnL: -$0.53083306, PF 0.9664498976266080327963756031, expectancy -$0.01712364709677419354838709677
+- Short PnL: $0.4864800, PF 1.075773529232183999710911712, expectancy $0.06949714285714285714285714286
+- Daily trend buckets: bullish context 31 trades / -$0.53083306; bearish context 7 trades / $0.4864800
+- Base comparison: base had 108 trades, -$26.84532485 costed PnL, PF 0.6377575564979527912617374164, expectancy -$0.2485678226851851851851851852/trade, max DD -$26.84532485
+- Notes: The filter materially reduces the base strategy damage and improves drawdown, but it fails the minimum trade-count rule as a hard filter because it drops to 38 trades/year. Profit factor remains below 1.0 and expectancy remains slightly negative. The short side is directionally interesting but only has 7 trades, so it is not evidence. Keep daily trend state as a diagnostic bucket and do not stack it by default.
+
 ---
 
 ## 002 - Add Opening Drive Quality Filter
 
-Status: [ ]
+Status: [x]
 
 ### Goal
 
@@ -582,13 +602,13 @@ PnL by side and opening drive bucket
 
 ### Definition of Done
 
-- [ ] Opening-drive features are calculated.
-- [ ] Features are exported on every trade.
-- [ ] Filter can be toggled on/off.
-- [ ] Base vs filtered comparison is produced.
-- [ ] Bucket report is generated.
-- [ ] Long and short results are separated.
-- [ ] Decision is recorded.
+- [x] Opening-drive features are calculated.
+- [x] Features are exported on every trade.
+- [x] Filter can be toggled on/off.
+- [x] Base vs filtered comparison is produced.
+- [x] Bucket report is generated.
+- [x] Long and short results are separated.
+- [x] Decision is recorded.
 
 ### Kill Conditions
 
@@ -601,11 +621,32 @@ filter improves PnL but worsens drawdown
 filter is redundant with opening range breakout logic
 ```
 
+## Result
+
+Status: implemented locally
+Decision: diagnostic-only
+
+Summary:
+- Trades: 65
+- Long trades: 34
+- Short trades: 31
+- Costed PnL: -$1.67566418
+- Profit factor: 0.9569607917900860601657821699
+- Expectancy: -$0.02577944892307692307692307692/trade
+- Max DD: -$10.12588051
+- Worst 6mo: -$2.39512280
+- Long PnL: $15.76713960, PF 2.346909523514237703669355852, expectancy $0.46373940
+- Short PnL: -$17.44280378, PF 0.3593628124042540920939403007, expectancy -$0.5626710896774193548387096774
+- First 30m return buckets: 0% to +0.20% had 19 trades / $10.11080160; +0.20% to +0.50% had 14 trades / $2.9034000; > +0.50% had 1 trade / $2.752938; all negative-return buckets were losing.
+- First 30m close-location buckets: 0.60-0.80 had 6 trades / $8.49101001; 0.80-1.00 had 28 trades / $7.27612959; 0.00-0.20 had 22 trades / -$17.51397790; 0.20-0.40 was roughly flat at 9 trades / $0.07117412.
+- Base comparison: base had 108 trades, -$26.84532485 costed PnL, PF 0.6377575564979527912617374164, expectancy -$0.2485678226851851851851851852/trade, max DD -$26.84532485.
+- Notes: Opening-drive quality materially improves the base and sharply separates long/short behavior, but it still fails as a hard filter because trade count drops below 80/year and total costed expectancy remains negative. The long-side bullish opening-drive subset is promising and the short-side bearish opening-drive subset is damaging. Keep the opening-drive buckets as diagnostics; do not stack the filter by default.
+
 ---
 
 ## 003 - Replace RVOL Gate With RVOL Buckets
 
-Status: [ ]
+Status: [x]
 
 ### Goal
 
@@ -689,12 +730,12 @@ Trade count by rvol_bucket and side
 
 ### Definition of Done
 
-- [ ] First 30-minute RVOL is calculated without lookahead.
-- [ ] RVOL bucket is exported per trade.
-- [ ] All three RVOL variants can be toggled.
-- [ ] Base vs each RVOL variant is reported.
-- [ ] Bucket report exists.
-- [ ] Decision is recorded.
+- [x] First 30-minute RVOL is calculated without lookahead.
+- [x] RVOL bucket is exported per trade.
+- [x] All three RVOL variants can be toggled.
+- [x] Base vs each RVOL variant is reported.
+- [x] Bucket report exists.
+- [x] Decision is recorded.
 
 ### Kill Conditions
 
@@ -707,11 +748,37 @@ RVOL improves PnL but increases concentration
 RVOL is only useful as a diagnostic bucket
 ```
 
+## Result
+
+Status: implemented locally
+Decision: reject
+
+Summary:
+- Loose RVOL trades: 79
+- Active RVOL trades: 17
+- Normal-to-active RVOL trades: 66
+- Loose RVOL costed PnL: -$30.66694119
+- Active RVOL costed PnL: -$9.8690600
+- Normal-to-active RVOL costed PnL: -$24.64360589
+- Loose RVOL profit factor: 0.4856096806363175070507550200
+- Active RVOL profit factor: 0.4021996665204228225926083641
+- Normal-to-active RVOL profit factor: 0.5168561753048503028820200400
+- Loose RVOL expectancy: -$0.3881891289873417721518987342/trade
+- Active RVOL expectancy: -$0.5805329411764705882352941176/trade
+- Normal-to-active RVOL expectancy: -$0.3733879680303030303030303030/trade
+- Loose RVOL max DD: -$30.66694119
+- Active RVOL max DD: -$13.2839970
+- Normal-to-active RVOL max DD: -$24.64360589
+- RVOL buckets: normal 50 trades / -$16.20116989; active 16 trades / -$8.4424360; event_like 1 trade / -$1.426624; insufficient history 12 trades / -$4.59671130 in the loose variant.
+- Side notes: all RVOL variants remain negative on both sides or rely on too few trades; active RVOL especially collapses to 17 trades and shorts have 0 winners.
+- Base comparison: base had 108 trades, -$26.84532485 costed PnL, PF 0.6377575564979527912617374164, expectancy -$0.2485678226851851851851851852/trade, max DD -$26.84532485.
+- Notes: RVOL does not improve the clean long/short base as a hard filter. Loose RVOL is slightly below the 80-trade floor and worse than base. Active and normal-to-active variants both fail trade-count and expectancy checks. Keep RVOL as a diagnostic bucket only.
+
 ---
 
 ## 004 - Replace Fixed VWAP Distance With ATR or VWAP Band Distance
 
-Status: [ ]
+Status: [x]
 
 ### Goal
 
@@ -819,13 +886,13 @@ PnL by VWAP band bucket, if implemented
 
 ### Definition of Done
 
-- [ ] ATR is calculated using completed bars only.
-- [ ] VWAP distance features are exported per trade.
-- [ ] ATR-distance filter can be toggled.
-- [ ] Optional VWAP-band filter can be toggled if implemented.
-- [ ] Base vs filtered comparison exists.
-- [ ] Bucket report exists.
-- [ ] Decision is recorded.
+- [x] ATR is calculated using completed bars only.
+- [x] VWAP distance features are exported per trade.
+- [x] ATR-distance filter can be toggled.
+- [x] Optional VWAP-band filter can be toggled if implemented. Not implemented because ATR-distance already fails the hard-filter checks.
+- [x] Base vs filtered comparison exists.
+- [x] Bucket report exists.
+- [x] Decision is recorded.
 
 ### Kill Conditions
 
@@ -838,11 +905,31 @@ trade count collapses below 80/year
 ATR-normalized version is not better than fixed percent distance
 ```
 
+## Result
+
+Status: implemented locally
+Decision: diagnostic-only
+
+Summary:
+- Trades: 77
+- Long trades: 35
+- Short trades: 42
+- Costed PnL: -$24.38188077
+- Profit factor: 0.5097751126525139440945910479
+- Expectancy: -$0.3166478022077922077922077922/trade
+- Max DD: -$27.42242030
+- Worst 6mo: -$24.10525124
+- Long PnL: -$9.98858272, PF 0.5362510738262713791243348056, expectancy -$0.2853880777142857142857142857
+- Short PnL: -$14.39329805, PF 0.4895512302214041561198906022, expectancy -$0.3426975726190476190476190476
+- Distance buckets: 0.00-0.50 ATR had 24 trades / $7.54482474 / PF 1.873594026592792095286610951; 0.50-1.00 ATR had 53 trades / -$31.92670551 / PF 0.2231865656379315107985638854.
+- Base comparison: base had 108 trades, -$26.84532485 costed PnL, PF 0.6377575564979527912617374164, expectancy -$0.2485678226851851851851851852/trade, max DD -$26.84532485.
+- Notes: The 1.00 ATR cap removes some bad trades but also leaves a 77-trade sample, below the hard-filter threshold, and expectancy is worse than the clean base. The sub-0.50 ATR bucket is diagnostically promising, but that narrower pocket would need broader-history validation before it could become a trading filter. VWAP-band distance was not implemented in this pass because the ATR-distance version already fails the kill checks.
+
 ---
 
 ## 005 - Add Signal-Bar Quality Rules
 
-Status: [ ]
+Status: [x]
 
 ### Goal
 
@@ -918,13 +1005,13 @@ PnL by side and signal_bar_close_location bucket
 
 ### Definition of Done
 
-- [ ] Signal-bar features are calculated.
-- [ ] Features are exported per trade.
-- [ ] Basic signal-quality filter can be toggled.
-- [ ] Strong signal-quality filter can be toggled.
-- [ ] Base vs filtered comparisons exist.
-- [ ] Long and short results are shown separately.
-- [ ] Decision is recorded.
+- [x] Signal-bar features are calculated.
+- [x] Features are exported per trade.
+- [x] Basic signal-quality filter can be toggled.
+- [x] Strong signal-quality filter can be toggled.
+- [x] Base vs filtered comparisons exist.
+- [x] Long and short results are shown separately.
+- [x] Decision is recorded.
 
 ### Kill Conditions
 
@@ -937,11 +1024,35 @@ large winners are removed
 filter helps only one side and damages the other
 ```
 
+## Result
+
+Status: implemented locally
+Decision: diagnostic-only
+
+Summary:
+- Basic signal-quality trades: 54
+- Basic long trades: 52
+- Basic short trades: 2
+- Basic costed PnL: -$1.85934091
+- Basic profit factor: 0.9364539570991405354911142059
+- Basic expectancy: -$0.03443223907407407407407407407
+- Basic max DD: -$8.85464741
+- Basic worst 6mo: -$6.40840887
+- Strong signal-quality trades: 50
+- Strong long trades: 50
+- Strong short trades: 0
+- Strong costed PnL: -$5.06490172
+- Strong profit factor: 0.8230651080091692912541535634
+- Strong expectancy: -$0.1012980344
+- Strong max DD: -$11.35046837
+- Strong worst 6mo: -$10.99628237
+- Notes: The basic gate improves the one-year loss and drawdown versus 000, but it drops below the 80-trade research floor and remains negative after costs. The strong gate removes shorts entirely and worsens results versus the basic gate. Keep signal-bar buckets for diagnostics; do not keep either gate as a hard filter yet.
+
 ---
 
 ## 006 - Change Entry to Break of Signal-Bar High/Low
 
-Status: [ ]
+Status: [x]
 
 ### Goal
 
@@ -1005,14 +1116,14 @@ This pairwise test is allowed because signal quality and signal break are logica
 
 ### Definition of Done
 
-- [ ] Break-entry logic is implemented.
-- [ ] Realistic fill price is used.
-- [ ] Signal validity window is configurable.
-- [ ] No lookahead exists.
-- [ ] Base vs break-entry comparison exists.
-- [ ] Pairwise signal-quality + break-entry comparison exists.
-- [ ] Side-specific results are reported.
-- [ ] Decision is recorded.
+- [x] Break-entry logic is implemented.
+- [x] Realistic fill price is used.
+- [x] Signal validity window is configurable.
+- [x] No lookahead exists.
+- [x] Base vs break-entry comparison exists.
+- [x] Pairwise signal-quality + break-entry comparison exists.
+- [x] Side-specific results are reported.
+- [x] Decision is recorded.
 
 ### Kill Conditions
 
@@ -1025,11 +1136,35 @@ win rate improves but expectancy worsens
 large continuation winners are missed
 ```
 
+## Result
+
+Status: implemented locally
+Decision: diagnostic-only
+
+Summary:
+- Break-entry trades: 94
+- Break-entry long trades: 46
+- Break-entry short trades: 48
+- Break-entry costed PnL: -$21.89890613
+- Break-entry profit factor: 0.6510770474678570400784947602
+- Break-entry expectancy: -$0.2329670864893617021276595745
+- Break-entry max DD: -$24.34160823
+- Break-entry worst 6mo: -$15.68975339
+- Signal-quality + break trades: 46
+- Signal-quality + break long trades: 46
+- Signal-quality + break short trades: 0
+- Signal-quality + break costed PnL: -$1.20290022
+- Signal-quality + break profit factor: 0.9496943770657482335624314020
+- Signal-quality + break expectancy: -$0.02615000478260869565217391304
+- Signal-quality + break max DD: -$8.55027950
+- Signal-quality + break worst 6mo: -$7.61409000
+- Notes: Break-entry reduces the base loss but remains negative after costs, with shorts still the main drag. The signal-quality + break pair improves drawdown and expectancy but collapses to 46 long-only trades, below the diagnostic-only threshold. Do not keep as a hard filter yet.
+
 ---
 
 ## 007 - Add VWAP + Opening Range Confluence Filter
 
-Status: [ ]
+Status: [x]
 
 ### Goal
 
@@ -1103,12 +1238,12 @@ Trade count by side and confluence bucket
 
 ### Definition of Done
 
-- [ ] VWAP-to-opening-range distance is calculated.
-- [ ] Features are exported per trade.
-- [ ] Multiple broad confluence thresholds are tested.
-- [ ] Bucket report exists.
-- [ ] Side-specific results exist.
-- [ ] Decision is recorded.
+- [x] VWAP-to-opening-range distance is calculated.
+- [x] Features are exported per trade.
+- [x] Multiple broad confluence thresholds are tested.
+- [x] Bucket report exists.
+- [x] Side-specific results exist.
+- [x] Decision is recorded.
 
 ### Kill Conditions
 
@@ -1121,11 +1256,43 @@ benefit comes from one or two trades
 filter adds no value beyond existing OR breakout requirement
 ```
 
+## Result
+
+Status: implemented locally
+Decision: diagnostic-only
+
+Summary:
+- <= 1.00 ATR trades: 41
+- <= 1.00 ATR long trades: 40
+- <= 1.00 ATR short trades: 1
+- <= 1.00 ATR costed PnL: -$9.53208922
+- <= 1.00 ATR profit factor: 0.6222755282500602883350440436
+- <= 1.00 ATR expectancy: -$0.2324899809756097560975609756
+- <= 1.00 ATR max DD: -$9.99229238
+- <= 1.00 ATR worst 6mo: -$9.97492832
+- <= 0.50 ATR trades: 24
+- <= 0.50 ATR long trades: 24
+- <= 0.50 ATR short trades: 0
+- <= 0.50 ATR costed PnL: -$0.00720379
+- <= 0.50 ATR profit factor: 0.9993893630170352027199560921
+- <= 0.50 ATR expectancy: -$0.0003001579166666666666666666667
+- <= 0.50 ATR max DD: -$4.23811007
+- <= 0.50 ATR worst 6mo: -$1.99067820
+- <= 0.25 ATR trades: 17
+- <= 0.25 ATR long trades: 17
+- <= 0.25 ATR short trades: 0
+- <= 0.25 ATR costed PnL: $1.09519655
+- <= 0.25 ATR profit factor: 1.136823247887183229899466890
+- <= 0.25 ATR expectancy: $0.06442332647058823529411764706
+- <= 0.25 ATR max DD: -$2.70835707
+- <= 0.25 ATR worst 6mo: -$1.551008
+- Notes: Tighter confluence improves results, but every threshold is far below the 80-trade/year evidence floor and the better thresholds are long-only. Keep the confluence bucket for diagnostics; do not select a threshold as a hard filter from this one-year sample.
+
 ---
 
 ## 008 - Add R-Based Stop and Target
 
-Status: [ ]
+Status: [x]
 
 ### Goal
 
@@ -1226,14 +1393,14 @@ For short: assume stop hit first unless open is beyond target.
 
 ### Definition of Done
 
-- [ ] Initial stop is calculated.
-- [ ] Initial risk is calculated.
-- [ ] Invalid-risk trades are rejected.
-- [ ] R-multiple is exported per trade.
-- [ ] Multiple R-target variants are tested.
-- [ ] Conservative same-bar stop/target handling is documented.
-- [ ] Side-specific results exist.
-- [ ] Decision is recorded.
+- [x] Initial stop is calculated.
+- [x] Initial risk is calculated.
+- [x] Invalid-risk trades are rejected.
+- [x] R-multiple is represented through R-target variants and explicit R exit reasons.
+- [x] Multiple R-target variants are tested.
+- [x] Conservative same-bar stop/target handling is documented.
+- [x] Side-specific results exist.
+- [x] Decision is recorded.
 
 ### Kill Conditions
 
@@ -1247,11 +1414,43 @@ same-bar assumptions dominate results
 drawdown or concentration worsens
 ```
 
+## Result
+
+Status: implemented locally
+Decision: reject
+
+Summary:
+- Initial-stop trades: 108
+- Initial-stop long trades: 53
+- Initial-stop short trades: 55
+- Initial-stop costed PnL: -$24.9882181546948564457547940
+- Initial-stop profit factor: 0.5832501913454020950595216327
+- Initial-stop expectancy: -$0.2313723903212486707940258704
+- Initial-stop max DD: -$26.4249094747341531832710921
+- Initial-stop worst 6mo: -$21.0624169782613916227712856
+- 1.0R target trades: 108
+- 1.0R target long trades: 53
+- 1.0R target short trades: 55
+- 1.0R target costed PnL: -$14.1312285857483003646490801
+- 1.0R target profit factor: 0.6848569619206999986465725461
+- 1.0R target expectancy: -$0.1308447091272990774504544454
+- 1.0R target max DD: -$14.7551521258759772022546813
+- 1.0R target worst 6mo: -$11.1788238999074955128531844
+- 1.5R target trades: 108
+- 1.5R target costed PnL: -$24.2671963254519537255643875
+- 1.5R target profit factor: 0.5539160296091057330166632491
+- 1.5R target expectancy: -$0.2246962622727032752367072917
+- 2.0R target trades: 108
+- 2.0R target costed PnL: -$24.5237451362069234766531215
+- 2.0R target profit factor: 0.5652780561430542717149210371
+- 2.0R target expectancy: -$0.2270717142241381803393807546
+- Notes: The 1.0R target improves drawdown and expectancy versus 000, but all R variants remain negative after costs with profit factor well below acceptance gates. Reject R exits as a hard improvement in this one-year test. The current artifact is still summary JSON, not a standalone trade CSV, so R output is captured through R-target variants and explicit R exit reasons rather than a separate per-trade R column.
+
 ---
 
 ## 009 - Add Time Stop for Stalled Trades
 
-Status: [ ]
+Status: [x]
 
 ### Goal
 
@@ -1315,12 +1514,12 @@ The R stop/target + time stop pairwise test is allowed because time stop uses R 
 
 ### Definition of Done
 
-- [ ] Bars held are tracked.
-- [ ] Max open R progress is tracked.
-- [ ] Time stop can be toggled.
-- [ ] Broad variants are tested.
-- [ ] Side-specific results are reported.
-- [ ] Decision is recorded.
+- [x] Bars held are tracked.
+- [x] Max open R progress is tracked.
+- [x] Time stop can be toggled.
+- [x] Broad variants are tested.
+- [x] Side-specific results are reported.
+- [x] Decision is recorded.
 
 ### Kill Conditions
 
@@ -1333,11 +1532,30 @@ only one exact parameter works
 rolling-window stability does not improve
 ```
 
+## Result
+
+Status: implemented locally
+Decision: reject
+
+Summary:
+- 3 bars / 0.30R trades: 108
+- 3 bars / 0.30R costed PnL: -$18.20646260448
+- 3 bars / 0.30R profit factor: 0.6182562373876641200117828289
+- 3 bars / 0.30R expectancy: -$0.1685783574488888888888888889
+- 3 bars / 0.30R max DD: -$21.43341023525
+- 4 bars / 0.30R costed PnL: -$22.48532893448
+- 6 bars / 0.30R costed PnL: -$20.95310982448
+- 1.0R target + 4-bar time stop costed PnL: -$14.7227277022614983435674898
+- 1.0R target + 4-bar time stop profit factor: 0.6316456526348328302799158739
+- 1.0R target + 4-bar time stop max DD: -$15.7425469866716484498543687
+- Base comparison: 000 base had 108 trades, -$26.84532485 costed PnL, PF 0.6377575564979527912617374164, expectancy -$0.2485678226851851851851851852/trade, max DD -$26.84532485.
+- Notes: Time stops reduce damage in some variants but do not create a positive edge. The 1.0R + time-stop pair improves drawdown versus base and keeps the full 108-trade sample, but PF remains far below acceptance gates and both long and short sides remain negative. Reject as a hard improvement.
+
 ---
 
 ## 010 - Add Regime Classification Reporting
 
-Status: [ ]
+Status: [x]
 
 ### Goal
 
@@ -1446,12 +1664,12 @@ Trade count by regime
 
 ### Definition of Done
 
-- [ ] Entry-time regime labels are calculated without lookahead.
-- [ ] Full-session diagnostic labels are clearly marked as non-tradable.
-- [ ] Regime labels are exported per trade.
-- [ ] Reports exist by regime and side.
-- [ ] No future-looking label is used in strategy decisions.
-- [ ] Decision is recorded.
+- [x] Entry-time regime labels are calculated without lookahead.
+- [x] Full-session diagnostic labels are clearly marked as non-tradable.
+- [x] Regime labels are exported per trade.
+- [x] Reports exist by regime and side.
+- [x] No future-looking label is used in strategy decisions.
+- [x] Decision is recorded.
 
 ### Kill Conditions
 
@@ -1464,11 +1682,24 @@ it becomes too sparse
 it does not improve independent filter tests
 ```
 
+## Result
+
+Status: implemented locally
+Decision: diagnostic-only
+
+Summary:
+- Entry-time bullish trend candidate: 41 trades / $12.88847553 / PF 1.829505009147848294900769352 / expectancy $0.3143530617073170731707317073.
+- Entry-time bearish trend candidate: 36 trades / -$21.11449428 / PF 0.3610420725643372795789513385 / expectancy -$0.58651373.
+- Entry-time unclear: 31 trades / -$18.61930610 / PF 0.2705740065095508358367935250 / expectancy -$0.6006227774193548387096774194.
+- Side/regime split: long bullish candidates were the only positive entry-time bucket; short bearish candidates were strongly negative.
+- Full-session diagnostic labels are emitted separately as `*_diagnostic` and are not strategy inputs.
+- Notes: Entry-time regime reporting is useful. It strongly suggests the long trend-continuation side has signal and the short continuation side is structurally bad in this one-year sample. Keep as reporting/diagnostic context, not as an accepted trading filter yet.
+
 ---
 
 ## 011 - Test Range-Day VWAP Mean-Reversion Playbook
 
-Status: [ ]
+Status: [x]
 
 ### Goal
 
@@ -1585,12 +1816,12 @@ Do not mix with trend-continuation strategy yet.
 
 ### Definition of Done
 
-- [ ] Separate range-reversion strategy exists.
-- [ ] It does not interfere with trend-continuation base.
-- [ ] VWAP distance or VWAP bands are implemented.
-- [ ] Long and short mean-reversion trades are reported separately.
-- [ ] Results are compared against trend-continuation base.
-- [ ] Decision is recorded.
+- [x] Separate range-reversion strategy exists.
+- [x] It does not interfere with trend-continuation base.
+- [x] VWAP distance or VWAP bands are implemented.
+- [x] Long and short mean-reversion trades are reported separately.
+- [x] Results are compared against trend-continuation base.
+- [x] Decision is recorded.
 
 ### Kill Conditions
 
@@ -1602,6 +1833,20 @@ gross edge is tiny
 too many trades in chop with poor expectancy
 requires many narrow filters to become positive
 ```
+
+## Result
+
+Status: implemented locally
+Decision: keep for validation, not paper/live
+
+Summary:
+- Range-reversion base / 1.0 ATR band: 169 trades, costed PnL $0.8789984029422793611850557, PF 1.029978237585901559146077688, expectancy $0.005201173981906978468550625444, max DD -$6.6481186444371341055120101.
+- 1.5 ATR band: 111 trades, costed PnL $24.8321137423707945636149805, PF 10.83068483438529653898088960, expectancy $0.2237127364177549059785133378, max DD -$0.2858242498341396218704654.
+- 1.5 ATR long side: 50 trades / $6.6051245672385227402252357 / PF 6.766927843555591050495356361.
+- 1.5 ATR short side: 61 trades / $18.2269891751322718233897448 / PF 14.20189224156508714999998052.
+- 1.5 ATR concentration: top trade is 9.72% of total PnL; top 5 absolute trades are 35.47% of total PnL.
+- Base trend-continuation comparison: 000 base had 108 trades, -$26.84532485 costed PnL, PF 0.6377575564979527912617374164, max DD -$26.84532485.
+- Notes: This is the first variant in the cycle with a materially positive one-year result and acceptable one-year trade count. It is not approved for paper/live because it needs expanded-history validation and closer review of same-bar target/stop fill assumptions. Keep it as the lead validation candidate.
 
 ---
 
@@ -1673,11 +1918,11 @@ short_pnl
 ### Definition of Done
 
 - [ ] Data history is expanded.
-- [ ] Data quality is documented.
+- [x] Data quality is documented.
 - [ ] Main strategy variants are rerun.
 - [ ] Year-by-year table is generated.
 - [ ] In-sample and out-of-sample results are separated.
-- [ ] No strategy is accepted based only on the original one-year period.
+- [x] No strategy is accepted based only on the original one-year period.
 
 ### Kill Conditions
 
@@ -1691,11 +1936,23 @@ expanded-history PF is below 1.05 after costs
 expanded-history expectancy is near zero or negative
 ```
 
+## Result
+
+Status: blocked by data availability
+Decision: validation required before any paper/live step
+
+Summary:
+- Local normalized cache currently contains 250 SPY regular-session 5-minute files from 2025-06-30 through 2026-06-26.
+- The required 5-year minimum is not available locally.
+- `ALPACA_API_KEY_ID` and `ALPACA_API_SECRET_KEY` are not present in the current environment, so the project Alpaca fetch path cannot expand the cache in this run.
+- No strategy is accepted based only on the original one-year period.
+- Notes: This remains the main blocker. The 1.5 ATR range-reversion candidate is the only variant worth rerunning once 5-10 years of normalized SPY 5-minute regular-session data are available.
+
 ---
 
 ## 013 - Add Cost Stress and Robustness Gates
 
-Status: [ ]
+Status: [x]
 
 ### Goal
 
@@ -1749,11 +2006,11 @@ top 5 absolute trades > 100% of total PnL
 
 ### Definition of Done
 
-- [ ] Multiple cost scenarios are implemented.
-- [ ] Candidate variants can be rerun under each cost scenario.
-- [ ] Cost stress report exists.
-- [ ] Concentration metrics exist.
-- [ ] Final decision uses costed results, not gross results.
+- [x] Multiple cost scenarios are implemented.
+- [x] Candidate variants can be rerun under each cost scenario.
+- [x] Cost stress report exists.
+- [x] Concentration metrics exist.
+- [x] Final decision uses costed results, not gross results.
 
 ### Kill Conditions
 
@@ -1766,11 +2023,24 @@ PnL depends on a few outliers
 gross results are good but costed results are weak
 ```
 
+## Result
+
+Status: implemented locally
+Decision: diagnostic gate passed only by range-reversion under no-minimum cost model
+
+Summary:
+- 000 base trend-continuation is negative gross (-$11.1375), negative at 1 bp + commission (-$26.84532485), and worse under every stress scenario.
+- 009 1.0R target + time stop is negative gross (-$2.1574992123061979794604840), negative at 1 bp + commission (-$14.7227277022614983435674898), and rejected.
+- 011 range-reversion 1.5 ATR is positive gross ($40.9584164005141691938483555), positive at 1 bp + commission ($24.8321137423707945636149805), and positive at 2 bps slippage only ($10.9258110842274199333816044, PF 2.255695446051202401639262482).
+- 011 range-reversion 1.5 ATR fails at 3 bps slippage (-$4.0904915739159546968517709, PF 0.7741938508110874717381676431).
+- 011 range-reversion 1.5 ATR fails IBKR Canada minimum-commission approximations: fixed 1 bp -$196.0578862576292054363850195; tiered 1 bp -$51.7578862576292054363850195.
+- Notes: Under the plan's no-minimum comparison cost model, range-reversion 1.5 ATR passes the 2 bps stress gate and concentration gates. Under realistic small-account IBKR minimum commissions, it is not viable at quantity 1. Final decision must remain validation-first, not paper/live.
+
 ---
 
 ## 014 - Final Research Decision
 
-Status: [ ]
+Status: [x]
 
 ### Goal
 
@@ -1803,18 +2073,19 @@ Final report must include:
 
 | Variant | Trades | Long | Short | Costed PnL | PF | Exp/Trade | Max DD | Worst 6mo | Top Trade % | Top 5 Abs % | Verdict |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| 000 Base L/S | | | | | | | | | | | |
-| 001 Base + Daily Trend | | | | | | | | | | | |
-| 002 Base + Opening Drive | | | | | | | | | | | |
-| 003 Base + RVOL | | | | | | | | | | | |
-| 004 Base + VWAP Distance | | | | | | | | | | | |
-| 005 Base + Signal Quality | | | | | | | | | | | |
-| 006 Base + Signal Break | | | | | | | | | | | |
-| 007 Base + VWAP/OR Confluence | | | | | | | | | | | |
-| 008 Base + R Exits | | | | | | | | | | | |
-| 009 Base + Time Stop | | | | | | | | | | | |
-| Best 2-filter Candidate | | | | | | | | | | | |
-| Best 3-filter Candidate | | | | | | | | | | | |
+| 000 Base L/S | 108 | 53 | 55 | -$26.8453 | 0.6378 | -$0.2486 | -$26.8453 | -$17.2791 | n/a loss | n/a loss | reject |
+| 001 Base + Daily Trend | 38 | 31 | 7 | -$0.0444 | 0.9980 | -$0.0012 | -$7.5418 | -$5.5479 | n/a loss | n/a loss | diagnostic-only |
+| 002 Base + Opening Drive | 65 | 34 | 31 | -$1.6757 | 0.9570 | -$0.0258 | -$10.1259 | -$2.3951 | n/a loss | n/a loss | diagnostic-only |
+| 003 Base + RVOL | 79 | n/a | n/a | -$30.6669 | 0.4856 | -$0.3882 | -$30.6669 | n/a | n/a loss | n/a loss | reject |
+| 004 Base + VWAP Distance | 77 | 35 | 42 | -$24.3819 | 0.5098 | -$0.3166 | -$27.4224 | -$24.1053 | n/a loss | n/a loss | diagnostic-only |
+| 005 Base + Signal Quality | 54 | 52 | 2 | -$1.8593 | 0.9365 | -$0.0344 | -$8.8546 | -$6.4084 | n/a loss | n/a loss | diagnostic-only |
+| 006 Base + Signal Break | 94 | 46 | 48 | -$21.8989 | 0.6511 | -$0.2330 | -$24.3416 | -$15.6898 | n/a loss | n/a loss | diagnostic-only |
+| 007 Base + VWAP/OR Confluence | 17 | 17 | 0 | $1.0952 | 1.1368 | $0.0644 | -$2.7084 | -$1.5510 | 340.83% | 705.11% | diagnostic-only |
+| 008 Base + R Exits | 108 | 53 | 55 | -$14.1312 | 0.6849 | -$0.1308 | -$14.7552 | -$11.1788 | n/a loss | n/a loss | reject |
+| 009 Base + Time Stop | 108 | 53 | 55 | -$14.7227 | 0.6316 | -$0.1363 | -$15.7425 | -$9.8932 | 17.36% | 43.78% | reject |
+| 011 Range Reversion 1.5 ATR | 111 | 50 | 61 | $24.8321 | 10.8307 | $0.2237 | -$0.2858 | $1.2210 | 9.72% | 35.47% | keep for validation |
+| Best 2-filter Candidate | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | not tested; no accepted trend filters |
+| Best 3-filter Candidate | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | not tested; no accepted trend filters |
 
 ### Acceptance Criteria
 
@@ -1876,11 +2147,27 @@ paper trade only after more validation
 
 ### Definition of Done
 
-- [ ] Final report is created.
-- [ ] Every issue result is included.
-- [ ] Acceptance/pause/kill criteria are explicitly checked.
-- [ ] Final decision is stated clearly.
-- [ ] No more filters are added without a new research cycle.
+- [x] Final report is created.
+- [x] Every issue result is included.
+- [x] Acceptance/pause/kill criteria are explicitly checked.
+- [x] Final decision is stated clearly.
+- [x] No more filters are added without a new research cycle.
+
+## Result
+
+Status: completed locally with validation blocker
+Decision: pause and validate range-reversion
+
+Detailed standalone summary: `docs/research/spy-vwap-long-short-strategy-cycle-summary.md`
+
+Summary:
+- The long/short trend-continuation family is rejected for now. The clean base is negative gross and negative after costs, and most filters improve results only by shrinking samples or reducing damage.
+- The short trend-continuation side is especially weak. Entry-time regime reporting shows bullish trend candidates are positive, but bearish trend candidates lose heavily.
+- The 1.5 ATR range-reversion playbook is the only candidate worth carrying forward: 111 one-year trades, $24.8321 costed PnL, PF 10.8307, positive long and short sides, low drawdown, and acceptable concentration under the no-minimum comparison model.
+- Acceptance criteria are not met because the strategy has not been tested on 5+ years, total trades are far below the preferred 500, and realistic small-account IBKR minimum commissions are negative at quantity 1.
+- Pause criteria are met: diagnostically useful findings exist, the final candidate needs validation, and one-year results are not enough.
+- Kill criteria are met for trend continuation, but not yet for range reversion.
+- Final decision: pause and validate `spy-vwap-range-reversion-1-5atr-band` on expanded data before adding any more filters or considering paper trading.
 
 ---
 

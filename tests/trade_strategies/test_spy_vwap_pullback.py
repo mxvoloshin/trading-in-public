@@ -20,7 +20,21 @@ from trade_strategies import (
     OpeningDriveQualityVwapReclaimStrategy,
     RvolBucketVwapReclaimStrategy,
     SpyVwapPullbackStrategy,
+    SpyVwapTrendContinuationActiveRvolFilterStrategy,
+    SpyVwapTrendContinuationAtrDistanceFilterStrategy,
+    SpyVwapTrendContinuationBasicSignalQualityFilterStrategy,
+    SpyVwapTrendContinuationDailyTrendFilterStrategy,
     SpyVwapTrendContinuationLongShortBaseStrategy,
+    SpyVwapTrendContinuationLooseRvolFilterStrategy,
+    SpyVwapTrendContinuationNormalToActiveRvolFilterStrategy,
+    SpyVwapTrendContinuationOneRTargetTimeStopStrategy,
+    SpyVwapTrendContinuationOpeningDriveFilterStrategy,
+    SpyVwapTrendContinuationOpeningRangeConfluenceLooseFilterStrategy,
+    SpyVwapTrendContinuationOpeningRangeConfluenceStrictFilterStrategy,
+    SpyVwapTrendContinuationSignalBreakEntryStrategy,
+    SpyVwapTrendContinuationSignalQualityBreakEntryStrategy,
+    SpyVwapTrendContinuationStrongSignalQualityFilterStrategy,
+    SpyVwapTrendContinuationTimeStopStrategy,
     StrategyDecisionContext,
     SymmetricSpyVwapPullbackStrategy,
     TrendDayVwapReclaimStrategy,
@@ -654,6 +668,414 @@ def test_long_short_trend_continuation_base_waits_for_atr_history() -> None:
     assert "base_atr_not_ready" in decisions[-1].reason
 
 
+def test_long_short_daily_trend_filter_allows_long_in_bullish_context() -> None:
+    strategy = SpyVwapTrendContinuationDailyTrendFilterStrategy(atr_period_5m=2)
+
+    _seed_completed_daily_closes(strategy, closes=[75.6 + index for index in range(25)])
+    decisions = _decisions_for_bars(
+        strategy,
+        _long_short_base_long_setup_bars(day=26),
+        position_quantity=Decimal("0"),
+    )
+
+    assert decisions[-1].action == DecisionAction.ENTER_LONG
+    assert (
+        decisions[-1].strategy_name == "spy-vwap-trend-continuation-long-short-daily-trend-filter"
+    )
+    assert "long_vwap_trend_continuation_reclaim" in decisions[-1].reason
+
+
+def test_long_short_daily_trend_filter_allows_short_in_bearish_context() -> None:
+    strategy = SpyVwapTrendContinuationDailyTrendFilterStrategy(atr_period_5m=2)
+
+    _seed_completed_daily_closes(strategy, closes=[125 - index for index in range(25)])
+    decisions = _decisions_for_bars(
+        strategy,
+        _long_short_base_short_setup_bars(day=26),
+        position_quantity=Decimal("0"),
+    )
+
+    assert decisions[-1].action == DecisionAction.ENTER_SHORT
+    assert "short_vwap_trend_continuation_rejection" in decisions[-1].reason
+
+
+def test_long_short_daily_trend_filter_blocks_long_in_bearish_context() -> None:
+    strategy = SpyVwapTrendContinuationDailyTrendFilterStrategy(atr_period_5m=2)
+
+    _seed_completed_daily_closes(strategy, closes=[125 - index for index in range(25)])
+    decisions = _decisions_for_bars(
+        strategy,
+        _long_short_base_long_setup_bars(day=26),
+        position_quantity=Decimal("0"),
+    )
+
+    assert decisions[-1].action == DecisionAction.HOLD
+    assert "short_base_entry_filter_not_met" in decisions[-1].reason
+
+
+def test_long_short_daily_trend_filter_waits_for_daily_history() -> None:
+    strategy = SpyVwapTrendContinuationDailyTrendFilterStrategy(atr_period_5m=2)
+
+    _seed_completed_daily_closes(strategy, closes=[75.6 + index for index in range(24)])
+    decisions = _decisions_for_bars(
+        strategy,
+        _long_short_base_long_setup_bars(day=26),
+        position_quantity=Decimal("0"),
+    )
+
+    assert decisions[-1].action == DecisionAction.HOLD
+    assert "daily_context_not_ready" in decisions[-1].reason
+
+
+def test_long_short_opening_drive_filter_allows_long_after_bullish_drive() -> None:
+    strategy = SpyVwapTrendContinuationOpeningDriveFilterStrategy(atr_period_5m=2)
+
+    decisions = _decisions_for_bars(
+        strategy,
+        _long_short_base_long_setup_bars(),
+        position_quantity=Decimal("0"),
+    )
+
+    assert decisions[-1].action == DecisionAction.ENTER_LONG
+    assert (
+        decisions[-1].strategy_name == "spy-vwap-trend-continuation-long-short-opening-drive-filter"
+    )
+    assert "long_vwap_trend_continuation_reclaim" in decisions[-1].reason
+
+
+def test_long_short_opening_drive_filter_allows_short_after_bearish_drive() -> None:
+    strategy = SpyVwapTrendContinuationOpeningDriveFilterStrategy(atr_period_5m=2)
+
+    decisions = _decisions_for_bars(
+        strategy,
+        _long_short_base_short_setup_bars(),
+        position_quantity=Decimal("0"),
+    )
+
+    assert decisions[-1].action == DecisionAction.ENTER_SHORT
+    assert "short_vwap_trend_continuation_rejection" in decisions[-1].reason
+
+
+def test_long_short_opening_drive_filter_rejects_neutral_drive() -> None:
+    strategy = SpyVwapTrendContinuationOpeningDriveFilterStrategy(atr_period_5m=2)
+    neutral_opening_drive = (
+        _bar(index=0, open=100.0, high=101.0, low=99.0, close=100.0),
+        _bar(index=1, open=100.0, high=101.0, low=100.0, close=100.5),
+        _bar(index=2, open=100.5, high=102.0, low=100.5, close=101.0),
+        _bar(index=3, open=101.0, high=102.0, low=101.0, close=101.5),
+        _bar(index=4, open=101.5, high=103.0, low=101.5, close=102.0),
+        _bar(index=5, open=102.0, high=103.0, low=99.0, close=100.5),
+        _bar(index=6, open=102.8, high=104.5, low=101.5, close=104.0),
+    )
+
+    decisions = _decisions_for_bars(
+        strategy,
+        neutral_opening_drive,
+        position_quantity=Decimal("0"),
+    )
+
+    assert decisions[-1].action == DecisionAction.HOLD
+    assert "neutral_opening_drive" in decisions[-1].reason
+
+
+def test_long_short_loose_rvol_filter_allows_missing_history() -> None:
+    strategy = SpyVwapTrendContinuationLooseRvolFilterStrategy(atr_period_5m=2)
+
+    decisions = _decisions_for_bars(
+        strategy,
+        _long_short_base_long_setup_bars(),
+        position_quantity=Decimal("0"),
+    )
+
+    assert decisions[-1].action == DecisionAction.ENTER_LONG
+    assert decisions[-1].strategy_name == "spy-vwap-trend-continuation-long-short-rvol-loose-filter"
+
+
+def test_long_short_active_rvol_filter_requires_active_opening_volume() -> None:
+    strategy = SpyVwapTrendContinuationActiveRvolFilterStrategy(
+        atr_period_5m=2,
+        rvol_lookback_sessions=1,
+    )
+
+    _decisions_for_bars(
+        strategy,
+        _long_short_base_long_setup_bars(day=25, volume=2_000),
+        position_quantity=Decimal("0"),
+    )
+    decisions = _decisions_for_bars(
+        strategy,
+        _long_short_base_long_setup_bars(day=26, volume=1_000),
+        position_quantity=Decimal("0"),
+    )
+
+    assert decisions[-1].action == DecisionAction.HOLD
+    assert "opening_rvol_too_low" in decisions[-1].reason
+
+
+def test_long_short_active_rvol_filter_enters_when_rvol_is_active() -> None:
+    strategy = SpyVwapTrendContinuationActiveRvolFilterStrategy(
+        atr_period_5m=2,
+        rvol_lookback_sessions=1,
+    )
+
+    _decisions_for_bars(
+        strategy,
+        _long_short_base_long_setup_bars(day=25, volume=1_000),
+        position_quantity=Decimal("0"),
+    )
+    decisions = _decisions_for_bars(
+        strategy,
+        _long_short_base_long_setup_bars(day=26, volume=1_500),
+        position_quantity=Decimal("0"),
+    )
+
+    assert decisions[-1].action == DecisionAction.ENTER_LONG
+
+
+def test_long_short_normal_active_rvol_filter_rejects_event_like_rvol() -> None:
+    strategy = SpyVwapTrendContinuationNormalToActiveRvolFilterStrategy(
+        atr_period_5m=2,
+        rvol_lookback_sessions=1,
+    )
+
+    _decisions_for_bars(
+        strategy,
+        _long_short_base_long_setup_bars(day=25, volume=1_000),
+        position_quantity=Decimal("0"),
+    )
+    decisions = _decisions_for_bars(
+        strategy,
+        _long_short_base_long_setup_bars(day=26, volume=2_000),
+        position_quantity=Decimal("0"),
+    )
+
+    assert decisions[-1].action == DecisionAction.HOLD
+    assert "opening_rvol_too_high" in decisions[-1].reason
+
+
+def test_long_short_atr_distance_filter_enters_when_distance_is_allowed() -> None:
+    strategy = SpyVwapTrendContinuationAtrDistanceFilterStrategy(
+        atr_period_5m=2,
+        max_vwap_distance_atr_multiple=Decimal("3.0"),
+    )
+
+    decisions = _decisions_for_bars(
+        strategy,
+        _long_short_base_long_setup_bars(),
+        position_quantity=Decimal("0"),
+    )
+
+    assert decisions[-1].action == DecisionAction.ENTER_LONG
+    assert (
+        decisions[-1].strategy_name == "spy-vwap-trend-continuation-long-short-atr-distance-filter"
+    )
+
+
+def test_long_short_atr_distance_filter_rejects_extended_entries() -> None:
+    strategy = SpyVwapTrendContinuationAtrDistanceFilterStrategy(
+        atr_period_5m=2,
+        max_vwap_distance_atr_multiple=Decimal("0.10"),
+    )
+
+    decisions = _decisions_for_bars(
+        strategy,
+        _long_short_base_long_setup_bars(),
+        position_quantity=Decimal("0"),
+    )
+
+    assert decisions[-1].action == DecisionAction.HOLD
+    assert "atr_vwap_distance_too_extended" in decisions[-1].reason
+
+
+def test_long_short_vwap_opening_range_confluence_filter_enters_when_near_orh() -> None:
+    strategy = SpyVwapTrendContinuationOpeningRangeConfluenceLooseFilterStrategy(atr_period_5m=2)
+
+    decisions = _decisions_for_bars(
+        strategy,
+        _long_short_base_long_setup_bars(),
+        position_quantity=Decimal("0"),
+    )
+
+    assert decisions[-1].action == DecisionAction.ENTER_LONG
+    assert (
+        decisions[-1].strategy_name
+        == "spy-vwap-trend-continuation-long-short-vwap-or-confluence-1-00-filter"
+    )
+
+
+def test_long_short_vwap_opening_range_confluence_filter_rejects_when_too_wide() -> None:
+    strategy = SpyVwapTrendContinuationOpeningRangeConfluenceStrictFilterStrategy(atr_period_5m=2)
+
+    decisions = _decisions_for_bars(
+        strategy,
+        _long_short_base_long_setup_bars(),
+        position_quantity=Decimal("0"),
+    )
+
+    assert decisions[-1].action == DecisionAction.HOLD
+    assert "vwap_opening_range_confluence_too_wide" in decisions[-1].reason
+
+
+def test_long_short_basic_signal_quality_filter_enters_on_good_signal_bar() -> None:
+    strategy = SpyVwapTrendContinuationBasicSignalQualityFilterStrategy(atr_period_5m=2)
+
+    decisions = _decisions_for_bars(
+        strategy,
+        _long_short_base_long_setup_bars(),
+        position_quantity=Decimal("0"),
+    )
+
+    assert decisions[-1].action == DecisionAction.ENTER_LONG
+    assert (
+        decisions[-1].strategy_name
+        == "spy-vwap-trend-continuation-long-short-signal-quality-basic-filter"
+    )
+
+
+def test_long_short_strong_signal_quality_filter_rejects_small_body_signal() -> None:
+    strategy = SpyVwapTrendContinuationStrongSignalQualityFilterStrategy(atr_period_5m=2)
+    small_body_signal = (
+        *_long_short_base_long_setup_bars()[:6],
+        _bar(index=6, open=103.9, high=104.5, low=101.5, close=104.0),
+    )
+
+    decisions = _decisions_for_bars(
+        strategy,
+        small_body_signal,
+        position_quantity=Decimal("0"),
+    )
+
+    assert decisions[-1].action == DecisionAction.HOLD
+    assert "signal_bar_body_too_small" in decisions[-1].reason
+
+
+def test_long_short_signal_break_entry_waits_for_next_bar_confirmation() -> None:
+    strategy = SpyVwapTrendContinuationSignalBreakEntryStrategy(atr_period_5m=2)
+    bars = (
+        *_long_short_base_long_setup_bars(),
+        _bar(index=7, open=104.4, high=105.2, low=104.1, close=104.9),
+    )
+
+    decisions = _decisions_for_bars(strategy, bars, position_quantity=Decimal("0"))
+
+    assert decisions[-2].action == DecisionAction.HOLD
+    assert "long_signal_bar_break_pending" in decisions[-2].reason
+    assert decisions[-1].action == DecisionAction.ENTER_LONG
+    assert "long_signal_bar_break_entry@104.5" in decisions[-1].reason
+
+
+def test_long_short_signal_break_entry_expires_without_confirmation() -> None:
+    strategy = SpyVwapTrendContinuationSignalBreakEntryStrategy(atr_period_5m=2)
+    bars = (
+        *_long_short_base_long_setup_bars(),
+        _bar(index=7, open=104.0, high=104.5, low=103.5, close=104.1),
+    )
+
+    decisions = _decisions_for_bars(strategy, bars, position_quantity=Decimal("0"))
+
+    assert decisions[-1].action == DecisionAction.HOLD
+    assert "signal_bar_break_expired" in decisions[-1].reason
+
+
+def test_long_short_signal_quality_break_entry_combines_quality_and_break() -> None:
+    strategy = SpyVwapTrendContinuationSignalQualityBreakEntryStrategy(atr_period_5m=2)
+    bars = (
+        *_long_short_base_long_setup_bars(),
+        _bar(index=7, open=104.6, high=105.2, low=104.1, close=104.9),
+    )
+
+    decisions = _decisions_for_bars(strategy, bars, position_quantity=Decimal("0"))
+
+    assert decisions[-1].action == DecisionAction.ENTER_LONG
+    assert "long_signal_bar_break_entry@104.6" in decisions[-1].reason
+
+
+def test_long_short_time_stop_exits_stalled_long_at_current_close() -> None:
+    strategy = SpyVwapTrendContinuationTimeStopStrategy(atr_period_5m=2, time_stop_bars=2)
+    setup_bars = _long_short_base_long_setup_bars()
+    _decisions_for_bars(strategy, setup_bars, position_quantity=Decimal("0"))
+
+    first_hold_bar = _bar(index=7, open=104.2, high=104.4, low=103.8, close=104.1)
+    first_decision = strategy.decide(
+        bar=first_hold_bar,
+        context=_context(
+            bar=first_hold_bar,
+            sequence_number=8,
+            previous_bar=setup_bars[-1],
+            position_quantity=Decimal("1"),
+            average_entry_price=Decimal("104.2"),
+        ),
+    )
+    stalled_bar = _bar(index=8, open=104.1, high=104.3, low=103.9, close=104.0)
+    stalled_decision = strategy.decide(
+        bar=stalled_bar,
+        context=_context(
+            bar=stalled_bar,
+            sequence_number=9,
+            previous_bar=first_hold_bar,
+            position_quantity=Decimal("1"),
+            average_entry_price=Decimal("104.2"),
+        ),
+    )
+
+    assert first_decision.action == DecisionAction.HOLD
+    assert stalled_decision.action == DecisionAction.EXIT_LONG
+    assert "time_stop_stalled_exit@104.0" in stalled_decision.reason
+
+
+def test_long_short_time_stop_holds_after_enough_open_r_progress() -> None:
+    strategy = SpyVwapTrendContinuationTimeStopStrategy(atr_period_5m=2, time_stop_bars=2)
+    setup_bars = _long_short_base_long_setup_bars()
+    _decisions_for_bars(strategy, setup_bars, position_quantity=Decimal("0"))
+
+    progress_bar = _bar(index=7, open=104.2, high=105.4, low=104.0, close=105.2)
+    strategy.decide(
+        bar=progress_bar,
+        context=_context(
+            bar=progress_bar,
+            sequence_number=8,
+            previous_bar=setup_bars[-1],
+            position_quantity=Decimal("1"),
+            average_entry_price=Decimal("104.2"),
+        ),
+    )
+    later_bar = _bar(index=8, open=105.0, high=105.1, low=104.2, close=104.8)
+    decision = strategy.decide(
+        bar=later_bar,
+        context=_context(
+            bar=later_bar,
+            sequence_number=9,
+            previous_bar=progress_bar,
+            position_quantity=Decimal("1"),
+            average_entry_price=Decimal("104.2"),
+        ),
+    )
+
+    assert decision.action == DecisionAction.HOLD
+    assert "long_base_thesis_still_valid" in decision.reason
+
+
+def test_long_short_r_target_time_stop_keeps_r_target_exit() -> None:
+    strategy = SpyVwapTrendContinuationOneRTargetTimeStopStrategy(atr_period_5m=2)
+    setup_bars = _long_short_base_long_setup_bars()
+    _decisions_for_bars(strategy, setup_bars, position_quantity=Decimal("0"))
+
+    target_bar = _bar(index=7, open=104.2, high=107.5, low=104.0, close=106.8)
+    decision = strategy.decide(
+        bar=target_bar,
+        context=_context(
+            bar=target_bar,
+            sequence_number=8,
+            previous_bar=setup_bars[-1],
+            position_quantity=Decimal("1"),
+            average_entry_price=Decimal("104.2"),
+        ),
+    )
+
+    assert decision.action == DecisionAction.EXIT_LONG
+    assert "r_target_exit@" in decision.reason
+
+
 def test_spy_vwap_pullback_respects_max_daily_trades() -> None:
     strategy = SpyVwapPullbackStrategy(max_trades_per_day=1)
     first_setup = (
@@ -754,6 +1176,126 @@ def test_strategy_registry_returns_long_short_trend_continuation_base() -> None:
     assert strategy.name == "spy-vwap-trend-continuation-long-short-base"
 
 
+def test_strategy_registry_returns_long_short_daily_trend_filter() -> None:
+    strategy = get_strategy("spy-vwap-trend-continuation-long-short-daily-trend-filter")
+
+    assert strategy.name == "spy-vwap-trend-continuation-long-short-daily-trend-filter"
+
+
+def test_strategy_registry_returns_long_short_opening_drive_filter() -> None:
+    strategy = get_strategy("spy-vwap-trend-continuation-long-short-opening-drive-filter")
+
+    assert strategy.name == "spy-vwap-trend-continuation-long-short-opening-drive-filter"
+
+
+def test_strategy_registry_returns_long_short_rvol_filters() -> None:
+    assert (
+        get_strategy("spy-vwap-trend-continuation-long-short-rvol-loose-filter").name
+        == "spy-vwap-trend-continuation-long-short-rvol-loose-filter"
+    )
+    assert (
+        get_strategy("spy-vwap-trend-continuation-long-short-rvol-active-filter").name
+        == "spy-vwap-trend-continuation-long-short-rvol-active-filter"
+    )
+    assert (
+        get_strategy("spy-vwap-trend-continuation-long-short-rvol-normal-active-filter").name
+        == "spy-vwap-trend-continuation-long-short-rvol-normal-active-filter"
+    )
+
+
+def test_strategy_registry_returns_long_short_atr_distance_filter() -> None:
+    strategy = get_strategy("spy-vwap-trend-continuation-long-short-atr-distance-filter")
+
+    assert strategy.name == "spy-vwap-trend-continuation-long-short-atr-distance-filter"
+
+
+def test_strategy_registry_returns_long_short_signal_quality_filters() -> None:
+    assert (
+        get_strategy("spy-vwap-trend-continuation-long-short-signal-quality-basic-filter").name
+        == "spy-vwap-trend-continuation-long-short-signal-quality-basic-filter"
+    )
+    assert (
+        get_strategy("spy-vwap-trend-continuation-long-short-signal-quality-strong-filter").name
+        == "spy-vwap-trend-continuation-long-short-signal-quality-strong-filter"
+    )
+
+
+def test_strategy_registry_returns_long_short_vwap_opening_range_confluence_filters() -> None:
+    assert (
+        get_strategy("spy-vwap-trend-continuation-long-short-vwap-or-confluence-1-00-filter").name
+        == "spy-vwap-trend-continuation-long-short-vwap-or-confluence-1-00-filter"
+    )
+    assert (
+        get_strategy("spy-vwap-trend-continuation-long-short-vwap-or-confluence-0-50-filter").name
+        == "spy-vwap-trend-continuation-long-short-vwap-or-confluence-0-50-filter"
+    )
+    assert (
+        get_strategy("spy-vwap-trend-continuation-long-short-vwap-or-confluence-0-25-filter").name
+        == "spy-vwap-trend-continuation-long-short-vwap-or-confluence-0-25-filter"
+    )
+
+
+def test_strategy_registry_returns_long_short_r_exit_filters() -> None:
+    assert (
+        get_strategy("spy-vwap-trend-continuation-long-short-initial-stop").name
+        == "spy-vwap-trend-continuation-long-short-initial-stop"
+    )
+    assert (
+        get_strategy("spy-vwap-trend-continuation-long-short-1-0r-target").name
+        == "spy-vwap-trend-continuation-long-short-1-0r-target"
+    )
+    assert (
+        get_strategy("spy-vwap-trend-continuation-long-short-1-5r-target").name
+        == "spy-vwap-trend-continuation-long-short-1-5r-target"
+    )
+    assert (
+        get_strategy("spy-vwap-trend-continuation-long-short-2-0r-target").name
+        == "spy-vwap-trend-continuation-long-short-2-0r-target"
+    )
+
+
+def test_strategy_registry_returns_long_short_signal_break_entry_filters() -> None:
+    assert (
+        get_strategy("spy-vwap-trend-continuation-long-short-signal-break-entry").name
+        == "spy-vwap-trend-continuation-long-short-signal-break-entry"
+    )
+    assert (
+        get_strategy("spy-vwap-trend-continuation-long-short-signal-quality-break-entry").name
+        == "spy-vwap-trend-continuation-long-short-signal-quality-break-entry"
+    )
+
+
+def test_strategy_registry_returns_long_short_time_stop_filters() -> None:
+    assert (
+        get_strategy("spy-vwap-trend-continuation-long-short-time-stop-4-030r").name
+        == "spy-vwap-trend-continuation-long-short-time-stop-4-030r"
+    )
+    assert (
+        get_strategy("spy-vwap-trend-continuation-long-short-time-stop-3-030r").name
+        == "spy-vwap-trend-continuation-long-short-time-stop-3-030r"
+    )
+    assert (
+        get_strategy("spy-vwap-trend-continuation-long-short-time-stop-6-030r").name
+        == "spy-vwap-trend-continuation-long-short-time-stop-6-030r"
+    )
+    assert (
+        get_strategy("spy-vwap-trend-continuation-long-short-1-0r-target-time-stop").name
+        == "spy-vwap-trend-continuation-long-short-1-0r-target-time-stop"
+    )
+
+
+def test_strategy_registry_returns_range_reversion_strategies() -> None:
+    assert get_strategy("spy-vwap-range-reversion-base").name == "spy-vwap-range-reversion-base"
+    assert (
+        get_strategy("spy-vwap-range-reversion-1-0atr-band").name
+        == "spy-vwap-range-reversion-1-0atr-band"
+    )
+    assert (
+        get_strategy("spy-vwap-range-reversion-1-5atr-band").name
+        == "spy-vwap-range-reversion-1-5atr-band"
+    )
+
+
 def _decisions_for_bars(
     strategy: SpyVwapPullbackStrategy | SymmetricSpyVwapPullbackStrategy,
     bars: tuple[Bar, ...],
@@ -790,32 +1332,80 @@ def _trend_day_reclaim_setup_bars(*, day: int = 26, volume: int = 1_000) -> tupl
     )
 
 
-def _long_short_base_long_setup_bars() -> tuple[Bar, ...]:
+def _long_short_base_long_setup_bars(*, day: int = 26, volume: int = 1_000) -> tuple[Bar, ...]:
     return (
-        _bar(index=0, open=100.0, high=101.0, low=99.0, close=100.0),
-        _bar(index=1, open=100.0, high=101.0, low=100.0, close=100.5),
-        _bar(index=2, open=100.5, high=102.0, low=100.5, close=101.0),
-        _bar(index=3, open=101.0, high=102.0, low=101.0, close=101.5),
-        _bar(index=4, open=101.5, high=103.0, low=101.5, close=102.0),
-        _bar(index=5, open=102.0, high=103.0, low=102.0, close=102.5),
-        _bar(index=6, open=102.8, high=104.5, low=101.5, close=104.0),
+        _bar(index=0, open=100.0, high=101.0, low=99.0, close=100.0, day=day, volume=volume),
+        _bar(
+            index=1,
+            open=100.0,
+            high=101.0,
+            low=100.0,
+            close=100.5,
+            day=day,
+            volume=volume,
+        ),
+        _bar(
+            index=2,
+            open=100.5,
+            high=102.0,
+            low=100.5,
+            close=101.0,
+            day=day,
+            volume=volume,
+        ),
+        _bar(
+            index=3,
+            open=101.0,
+            high=102.0,
+            low=101.0,
+            close=101.5,
+            day=day,
+            volume=volume,
+        ),
+        _bar(
+            index=4,
+            open=101.5,
+            high=103.0,
+            low=101.5,
+            close=102.0,
+            day=day,
+            volume=volume,
+        ),
+        _bar(
+            index=5,
+            open=102.0,
+            high=103.0,
+            low=102.0,
+            close=102.5,
+            day=day,
+            volume=volume,
+        ),
+        _bar(
+            index=6,
+            open=102.8,
+            high=104.5,
+            low=101.5,
+            close=104.0,
+            day=day,
+            volume=volume,
+        ),
     )
 
 
-def _long_short_base_short_setup_bars() -> tuple[Bar, ...]:
+def _long_short_base_short_setup_bars(*, day: int = 26) -> tuple[Bar, ...]:
     return (
-        _bar(index=0, open=100.0, high=101.0, low=99.0, close=100.0),
-        _bar(index=1, open=100.0, high=100.0, low=99.0, close=99.5),
-        _bar(index=2, open=99.5, high=99.5, low=98.0, close=99.0),
-        _bar(index=3, open=99.0, high=99.0, low=98.0, close=98.5),
-        _bar(index=4, open=98.5, high=98.5, low=97.0, close=98.0),
-        _bar(index=5, open=98.0, high=98.0, low=97.0, close=97.5),
-        _bar(index=6, open=97.2, high=98.5, low=95.5, close=96.0),
+        _bar(index=0, open=100.0, high=101.0, low=99.0, close=100.0, day=day),
+        _bar(index=1, open=100.0, high=100.0, low=99.0, close=99.5, day=day),
+        _bar(index=2, open=99.5, high=99.5, low=98.0, close=99.0, day=day),
+        _bar(index=3, open=99.0, high=99.0, low=98.0, close=98.5, day=day),
+        _bar(index=4, open=98.5, high=98.5, low=97.0, close=98.0, day=day),
+        _bar(index=5, open=98.0, high=98.0, low=97.0, close=97.5, day=day),
+        _bar(index=6, open=97.2, high=98.5, low=95.5, close=96.0, day=day),
     )
 
 
 def _seed_completed_daily_closes(
-    strategy: DailyContextVwapReclaimStrategy,
+    strategy: SpyVwapPullbackStrategy,
     *,
     closes: Sequence[float],
 ) -> None:
@@ -839,6 +1429,7 @@ def _context(
     sequence_number: int,
     previous_bar: Bar | None,
     position_quantity: Decimal,
+    average_entry_price: Decimal = Decimal("0"),
 ) -> StrategyDecisionContext:
     input_ref = StrategyInputRef(
         instrument=InstrumentRef(instrument_id="SPY.US", market="XNYS", currency="USD"),
@@ -852,6 +1443,7 @@ def _context(
         sequence_number=sequence_number,
         previous_bar=previous_bar,
         position_quantity=position_quantity,
+        average_entry_price=average_entry_price,
     )
 
 
