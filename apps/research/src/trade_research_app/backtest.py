@@ -651,11 +651,19 @@ def default_cost_stress_scenarios() -> tuple[CostStressScenario, ...]:
             ),
         ),
         CostStressScenario(
-            "slippage_1bps_commission_min_1",
+            "ibkr_ca_fixed_1bps",
             BacktestCostModel(
                 slippage_bps=Decimal("1"),
                 commission_per_share=Decimal("0.005"),
                 minimum_commission=Decimal("1"),
+            ),
+        ),
+        CostStressScenario(
+            "ibkr_ca_tiered_1bps",
+            BacktestCostModel(
+                slippage_bps=Decimal("1"),
+                commission_per_share=Decimal("0.0035"),
+                minimum_commission=Decimal("0.35"),
             ),
         ),
     )

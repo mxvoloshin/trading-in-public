@@ -55,7 +55,7 @@ uv run python -m trade_research_app backtest run \
   --session regular \
   --slippage-bps 1 \
   --commission-per-share 0.005 \
-  --minimum-commission 0
+  --minimum-commission 1
 ```
 
 The runner applies slippage one way: buy fills are adjusted above the next bar
@@ -63,6 +63,32 @@ open and sell fills are adjusted below the next bar open. Commissions are charge
 on every simulated fill as `max(quantity * commission_per_share,
 minimum_commission)`. Defaults are zero so gross and cost-adjusted runs are
 deliberate and reproducible.
+
+For IBKR Canada US-listed stocks/ETFs, the current research approximations are:
+
+- `ibkr_ca_fixed_1bps`: `1` bp one-way slippage, `USD 0.005/share`, and a
+  `USD 1.00` minimum commission per order. IBKR Canada describes fixed US
+  stocks/ETFs pricing as all-inclusive, with exchange, clearing, and regulatory
+  fees included in the fixed rate.
+- `ibkr_ca_tiered_1bps`: `1` bp one-way slippage, `USD 0.0035/share`, and a
+  `USD 0.35` minimum commission per order. Tiered pricing passes exchange,
+  clearing, regulatory, and possible rebate effects through separately, so this
+  is an approximation rather than a full venue-by-venue execution model.
+
+Sources checked on 2026-06-30:
+
+- IBKR Canada commissions page:
+  <https://www.interactivebrokers.ca/en/pricing/commissions-home.php>
+- IBKR US stocks/ETF detailed commission schedule:
+  <https://www.interactivebrokers.com/en/pricing/commissions-stocks.php>
+- IBKR Canada margin education:
+  <https://www.interactivebrokers.ca/en/trading/margin-education.php>
+- IBKR Canada margin rates:
+  <https://www.interactivebrokers.ca/en/trading/margin-rates.php>
+
+The older `slippage_1bps_commission` scenario is still useful as a no-minimum
+per-share sensitivity check, but it should not be treated as the realistic
+small-account decision model.
 
 ## Strategy Selection
 
@@ -225,7 +251,7 @@ Backtest summary:
 | Max drawdown duration | `157` completed trades |
 | Ending position | `0` |
 
-Mild cost scenario:
+Legacy no-minimum sensitivity scenario:
 
 ```sh
 uv run python -m trade_research_app backtest run \
@@ -404,6 +430,8 @@ edge:
 | `slippage_0_5bps` | `-$16.570475480` | `-$0.0596060269` | `0.9080` | `$18.917475480` | `8.06x` |
 | `slippage_1bps` | `-$35.48795096` | `-$0.1276544999` | `0.8164` | `$37.83495096` | `16.12x` |
 | `slippage_1bps_commission` | `-$38.26795096` | `-$0.1376544999` | `0.8039` | `$40.61495096` | `17.31x` |
+| `ibkr_ca_fixed_1bps` | `-$591.48795096` | `-$2.1276544999` | `0.0759` | `$593.83495096` | `253.02x` |
+| `ibkr_ca_tiered_1bps` | `-$230.08795096` | `-$0.8276544999` | `0.3198` | `$232.43495096` | `99.03x` |
 
 The stress report also carries the median same-session post-exit favorable move
 for each scenario. That keeps exit-quality context visible while comparing cost
@@ -420,6 +448,8 @@ edge:
 | `slippage_0_5bps` | `$21.285110355` | `$0.0484854450` | `1.0711` | `$29.813789645` | `0.58x` |
 | `slippage_1bps` | `-$8.52867929` | `-$0.0194275155` | `0.9734` | `$59.62757929` | `1.17x` |
 | `slippage_1bps_commission` | `-$12.91867929` | `-$0.0294275155` | `0.9600` | `$64.01757929` | `1.25x` |
+| `ibkr_ca_fixed_1bps` | `-$886.52867929` | `-$2.0194275155` | `0.1334` | `$937.62757929` | `18.35x` |
+| `ibkr_ca_tiered_1bps` | `-$315.82867929` | `-$0.7194275155` | `0.4264` | `$366.92757929` | `7.18x` |
 
 ### Trend-Day VWAP Reclaim Candidate
 
@@ -486,7 +516,7 @@ Robustness split:
 
 Verdict: reject as a live/paper candidate under the current kill criteria. It is
 better than the baseline and the symmetric long/short variant on gross edge,
-trade count, and drawdown, but the mild cost model still flips it negative. The
+trade count, and drawdown, but the legacy no-minimum cost model still flips it negative. The
 useful research signal is that trend-up sessions are strongly positive while
 chop/mixed and trend-down sessions are the damage centers; the next task should
 focus on earlier tradable filters for those regimes rather than relaxing exits
@@ -547,7 +577,7 @@ Cost stress for `trend-day-vwap-reclaim-entry-filter`:
 | `slippage_1bps_commission` | `$3.17277618` | `$0.0396597023` | `1.0580` | `0.79x` |
 | `slippage_2bps` | `-$6.94244764` | `-$0.0867805955` | `0.8878` | `1.47x` |
 
-The filter improves the current research candidate under the mild cost model:
+The filter improves the current research candidate under the legacy no-minimum cost model:
 it changes the narrowed trend-day reclaim from `-$2.57240342` to
 `$3.17277618`, cuts closed trades from `176` to `80`, and improves expectancy
 from `-$0.0146` to `$0.0397` per completed trade. It also materially reduces
@@ -570,8 +600,8 @@ validation:
 - ordinary sessions: `69` trades, `$6.60693018`
 
 Verdict: the issue #36 filter improves the strategy versus the prior candidates
-and clears the basic net-expectancy kill criterion under the mild cost model,
-but it does not clear the robustness bar. The research result is "promising
+under the legacy no-minimum cost model, but it does not clear the robustness bar
+or the IBKR Canada small-account fee bar. The research result is "promising
 filter, not live-ready strategy." The next research step should investigate why
 recent rolling windows and event days remain negative before adding more entries
 or loosening exits.
@@ -610,7 +640,7 @@ gap/RVOL gate before entry:
 
 The first broad positive-gap attempt was rejected before finalizing the default:
 `0.1%` to `1.2%` positive gaps produced `-$1.2750` gross and `-$6.99566150`
-under the mild cost model. The narrower `0.2%` to `0.6%` gap pocket was the
+under the legacy no-minimum cost model. The narrower `0.2%` to `0.6%` gap pocket was the
 only tested positive-gap slice that improved the current best candidate without
 making the first/second chronological split worse.
 
@@ -625,6 +655,8 @@ One-year comparison, same cached SPY 5-minute regular-session data and quantity
 | `trend-day-vwap-reclaim-entry-filter` | 1 bp + `$0.005/share` | `80` | `$3.17277618` | `$0.0396597023` | `1.0580` | `-$16.97566632` |
 | `gap-and-go-vwap-pullback` | gross | `21` | `$7.1550` | `$0.3407142857` | `1.6981` | `-$5.1000` |
 | `gap-and-go-vwap-pullback` | 1 bp + `$0.005/share` | `21` | `$4.07345250` | `$0.1939739286` | `1.3347` | `-$5.57270800` |
+| `gap-and-go-vwap-pullback` | IBKR CA fixed approx | `21` | `-$37.71654750` | `-$1.7960260714` | `0.1488` | `-$37.71654750` |
+| `gap-and-go-vwap-pullback` | IBKR CA tiered approx | `21` | `-$10.41654750` | `-$0.4960260714` | `0.5369` | `-$10.41654750` |
 
 Cost stress for `gap-and-go-vwap-pullback`:
 
@@ -637,8 +669,10 @@ Cost stress for `gap-and-go-vwap-pullback`:
 | `slippage_1bps_commission` | `$4.07345250` | `$0.1939739286` | `1.3347` | `0.43x` |
 | `slippage_2bps` | `$1.41190500` | `$0.0672335714` | `1.1008` | `0.80x` |
 | `slippage_3bps` | `-$1.45964250` | `-$0.0695067857` | `0.9091` | `1.20x` |
+| `ibkr_ca_fixed_1bps` | `-$37.71654750` | `-$1.7960260714` | `0.1488` | `6.27x` |
+| `ibkr_ca_tiered_1bps` | `-$10.41654750` | `-$0.4960260714` | `0.5369` | `2.46x` |
 
-Regime and robustness split for the mild cost model:
+Regime and robustness split for the legacy no-minimum cost model:
 
 | Bucket | Closed trades | Total PnL | Expectancy |
 | --- | ---: | ---: | ---: |
@@ -663,11 +697,56 @@ Chronological and rolling-window split:
 
 Verdict: the gap/RVOL candidate improves the strategy on headline costed
 metrics and has a better first/second split than the previous entry-time filter.
-It is still not live-ready. The result is based on only `21` trades, the largest
-trade is bigger than the final profit, event days remain negative, and late
-rolling windows still fail. Treat this as a promising research clue: modest
-positive gaps with normal opening participation are worth further study, while
-broad positive-gap chasing and high-RVOL gap sessions are not validated.
+That headline was using the older no-minimum commission scenario. Under
+IBKR Canada small-account minimum commissions, the one-share normalized result
+turns negative on both fixed and tiered pricing. It is still not live-ready. The
+result is based on only `21` trades, the largest trade is bigger than the final
+profit, event days remain negative, and late rolling windows still fail. Treat
+this as a promising research clue: modest positive gaps with normal opening
+participation are worth further study, while broad positive-gap chasing and
+high-RVOL gap sessions are not validated.
+
+### Small Account Sizing Example
+
+The backtest runner uses a fixed `--quantity`; it does not yet size orders from
+account equity, risk per trade, buying power, or margin cushion. To estimate a
+small account, choose a share quantity first, then rerun the same strategy with
+that quantity and realistic costs.
+
+For a `USD 5,000` account trading SPY over this sample:
+
+- observed cached SPY close range: about `$615.70` to `$760.21`
+- cash-sized conservative example: `6` shares keeps notional under `$5,000` near
+  the sample high
+- RegT-style margin example: IBKR Canada explains that rules-based margin can
+  allow borrowing `50%` of the stock purchase value, so `13` shares is a rough
+  `2x` buying-power example near the sample high
+- margin buying power is not a profit target; it increases loss size, margin-call
+  risk, and possible financing exposure
+- these runs do not include tax effects, FX conversion, tiered venue-specific
+  pass-through details, or margin interest
+
+`gap-and-go-vwap-pullback`, same one-year sample:
+
+| Quantity | Approx account interpretation | Cost model | Closed trades | Total PnL | Return on `$5,000` | Max DD | Profit factor |
+| ---: | --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `1` | normalized comparison only | IBKR CA fixed approx | `21` | `-$37.71654750` | `-0.75%` | `-$37.71654750` | `0.1488` |
+| `1` | normalized comparison only | IBKR CA tiered approx | `21` | `-$10.41654750` | `-0.21%` | `-$10.41654750` | `0.5369` |
+| `6` | cash-sized | IBKR CA fixed approx | `21` | `-$16.29928500` | `-0.33%` | `-$40.15207700` | `0.8397` |
+| `6` | cash-sized | IBKR CA tiered approx | `21` | `$11.00071500` | `0.22%` | `-$35.35624800` | `1.1338` |
+| `13` | rough `2x` margin-sized | IBKR CA fixed approx | `21` | `$13.68488250` | `0.27%` | `-$78.05520400` | `1.0738` |
+| `13` | rough `2x` margin-sized | IBKR CA tiered approx | `21` | `$40.98488250` | `0.82%` | `-$74.15520400` | `1.2469` |
+
+This answers the "how much would I earn with `$5,000`?" question only as a
+historical what-if. The best current example is about `$40.98` over one year on
+a rough `13`-share margin-sized run under the tiered approximation, before taxes,
+FX, full pass-through fees, financing details, missed fills, and live execution
+differences. That is not enough evidence to treat the strategy as working.
+
+The entry-filtered predecessor also does not validate the path at `13` shares:
+with IBKR CA tiered pricing it loses `-$4.35390966`, and with fixed pricing it
+loses `-$108.35390966`. The apparent profitability is concentrated in the final
+21-trade gap/RVOL subset, which raises overfitting risk.
 
 For the costed long-only baseline:
 
@@ -695,10 +774,11 @@ For the costed symmetric long/short candidate:
   result is not chronologically stable
 
 Kill-criteria interpretation: any next candidate must show positive net
-expectancy after the mild cost model, avoid relying on a handful of large trend
-captures to rescue many small losses, and remain positive across at least the
-first/second chronological split plus the main 3-month and 6-month windows. If
-those diagnostics fail, the research result should be rejected instead of tuned.
+expectancy after the IBKR Canada fixed and tiered approximations, avoid relying
+on a handful of large trend captures to rescue many small losses, and remain
+positive across at least the first/second chronological split plus the main
+3-month and 6-month windows. If those diagnostics fail, the research result
+should be rejected instead of tuned.
 
 The macro event split adds another caution:
 
@@ -721,10 +801,12 @@ Verdict: this first mechanical VWAP-pullback version is not live-ready. The
 gross edge is effectively flat before commissions, spread, slippage, missed
 fills, taxes, borrow/margin constraints, and operational risk. A one-share gross
 profit of `$2.3470` over `278` completed trades is about `$0.0084` per completed
-trade. Even a mild cost scenario with `1` bp one-way slippage and `$0.005/share`
-commission turns the result into a `-$38.26795096` loss. The measured execution
-cost of about `$0.1461` per completed trade is far larger than the gross
-expectancy of about `$0.0084` per completed trade.
+trade. Even the legacy no-minimum scenario with `1` bp one-way slippage and
+`$0.005/share` commission turns the result into a `-$38.26795096` loss. The
+IBKR Canada fixed and tiered approximations are worse at one-share size because
+minimum commissions dominate. The measured execution cost in the no-minimum
+scenario, about `$0.1461` per completed trade, is already far larger than the
+gross expectancy of about `$0.0084` per completed trade.
 
 The useful result is not "trade this." The useful result is that both long-only
 and symmetric long/short candidates can be expressed through shared strategy
