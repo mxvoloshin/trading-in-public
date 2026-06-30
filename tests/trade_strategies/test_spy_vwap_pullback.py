@@ -17,6 +17,7 @@ from trade_strategies import (
     EntryFilteredTrendDayVwapReclaimStrategy,
     GapAndGoVwapPullbackStrategy,
     OpeningDriveQualityVwapReclaimStrategy,
+    RvolBucketVwapReclaimStrategy,
     SpyVwapPullbackStrategy,
     StrategyDecisionContext,
     SymmetricSpyVwapPullbackStrategy,
@@ -495,6 +496,52 @@ def test_opening_drive_quality_vwap_reclaim_treats_flat_opening_range_as_neutral
     assert "opening_drive_close_position_too_weak" in decisions[-1].reason
 
 
+def test_rvol_bucket_vwap_reclaim_enters_when_opening_rvol_is_normal_or_better() -> None:
+    strategy = RvolBucketVwapReclaimStrategy(
+        max_entry_distance_from_vwap=Decimal("0.03"),
+        relative_volume_lookback_sessions=1,
+    )
+
+    _seed_completed_daily_closes(strategy, closes=[75.6 + index for index in range(25)])
+    prior_day = _trend_day_reclaim_setup_bars(day=25, volume=1_000)
+    current_day = _trend_day_reclaim_setup_bars(day=26, volume=1_100)
+    _decisions_for_bars(strategy, prior_day, position_quantity=Decimal("0"))
+    decisions = _decisions_for_bars(strategy, current_day, position_quantity=Decimal("0"))
+
+    assert decisions[-1].action == DecisionAction.ENTER_LONG
+    assert decisions[-1].strategy_name == "trend-day-vwap-reclaim-v4-rvol-buckets"
+    assert "trend_day_vwap_reclaim" in decisions[-1].reason
+
+
+def test_rvol_bucket_vwap_reclaim_rejects_low_opening_rvol() -> None:
+    strategy = RvolBucketVwapReclaimStrategy(
+        max_entry_distance_from_vwap=Decimal("0.03"),
+        relative_volume_lookback_sessions=1,
+    )
+
+    _seed_completed_daily_closes(strategy, closes=[75.6 + index for index in range(25)])
+    prior_day = _trend_day_reclaim_setup_bars(day=25, volume=2_000)
+    current_day = _trend_day_reclaim_setup_bars(day=26, volume=1_000)
+    _decisions_for_bars(strategy, prior_day, position_quantity=Decimal("0"))
+    decisions = _decisions_for_bars(strategy, current_day, position_quantity=Decimal("0"))
+
+    assert decisions[-1].action == DecisionAction.HOLD
+    assert "opening_rvol_too_low" in decisions[-1].reason
+
+
+def test_rvol_bucket_vwap_reclaim_skips_rvol_filter_until_history_exists() -> None:
+    strategy = RvolBucketVwapReclaimStrategy(
+        max_entry_distance_from_vwap=Decimal("0.03"),
+    )
+
+    _seed_completed_daily_closes(strategy, closes=[75.6 + index for index in range(25)])
+    current_day = _trend_day_reclaim_setup_bars(day=26)
+    decisions = _decisions_for_bars(strategy, current_day, position_quantity=Decimal("0"))
+
+    assert decisions[-1].action == DecisionAction.ENTER_LONG
+    assert "trend_day_vwap_reclaim" in decisions[-1].reason
+
+
 def test_spy_vwap_pullback_respects_max_daily_trades() -> None:
     strategy = SpyVwapPullbackStrategy(max_trades_per_day=1)
     first_setup = (
@@ -575,6 +622,12 @@ def test_strategy_registry_returns_opening_drive_quality_vwap_reclaim() -> None:
     strategy = get_strategy("trend-day-vwap-reclaim-v3-opening-drive")
 
     assert strategy.name == "trend-day-vwap-reclaim-v3-opening-drive"
+
+
+def test_strategy_registry_returns_rvol_bucket_vwap_reclaim() -> None:
+    strategy = get_strategy("trend-day-vwap-reclaim-v4-rvol-buckets")
+
+    assert strategy.name == "trend-day-vwap-reclaim-v4-rvol-buckets"
 
 
 def _decisions_for_bars(

@@ -153,8 +153,10 @@ The first regime tags are reporting-only diagnostics:
   close lands inside that opening window's high-low range.
 - `trend_breakdown` uses full-session VWAP direction and close location to
   split `trend_up`, `trend_down`, and `chop_or_mixed` sessions.
-- `relative_volume_breakdown` compares session volume to the trailing 20-session
-  average when enough prior sessions exist.
+- `relative_volume_breakdown` compares first-30-minute opening-window volume to
+  the trailing 20 completed-session average and buckets it as
+  `dead`, `normal`, `active`, or `event_like`. Sessions before enough prior
+  opening windows exist are reported as `insufficient_rvol_history`.
 
 The macro event tags are also reporting-only diagnostics:
 
@@ -879,9 +881,8 @@ Regime and opening-drive splits for `trend-day-vwap-reclaim-v3-opening-drive`:
 | `trend_up` | `17` | `$12.76896949` | `$0.7511` |
 | `chop_or_mixed` | `11` | `-$6.40865301` | `-$0.5826` |
 | `trend_down` | `2` | `-$1.616265` | `-$0.8081` |
-| `normal_relative_volume` | `23` | `$7.53172848` | `$0.3275` |
-| `low_relative_volume` | `6` | `-$2.4801455` | `-$0.4134` |
-| `high_relative_volume` | `1` | `-$0.3075315` | `-$0.3075` |
+| `normal` opening RVOL | `25` | `$6.19076698` | `$0.2476` |
+| `active` opening RVOL | `5` | `-$1.4467155` | `-$0.2893` |
 
 Verdict: promising research clue, still not a live candidate. The opening-drive
 filter improves the legacy no-minimum result versus both the issue #43
@@ -894,6 +895,93 @@ IBKR Canada small-account minimum commission approximations remain materially
 negative. Treat the opening-drive close-position bucket as a useful diagnostic
 and a candidate filter to carry into the next tests, not proof of a tradable
 edge.
+
+Issue #45 adds `trend-day-vwap-reclaim-v4-rvol-buckets`, an opening-RVOL filter
+on top of `trend-day-vwap-reclaim-v3-opening-drive`:
+
+```sh
+uv run python -m trade_research_app backtest run \
+  --strategy trend-day-vwap-reclaim-v4-rvol-buckets \
+  --symbol SPY \
+  --timeframe 5Min \
+  --start 2025-06-28 \
+  --end 2026-06-27 \
+  --market XNYS \
+  --session regular \
+  --slippage-bps 1 \
+  --commission-per-share 0.005 \
+  --minimum-commission 0
+```
+
+The strategy keeps the completed-daily context, opening-drive quality,
+entry-time trend gates, and VWAP reclaim entry/exit rules unchanged. It replaces
+the earlier lenient `0.85x` opening-volume gate with:
+
+```text
+opening_rvol =
+  first_30m_volume / trailing_20_completed_session_average_first_30m_volume
+
+entry_allowed =
+  opening_rvol >= 1.00
+```
+
+If fewer than `20` completed prior opening windows exist, the strategy skips the
+RVOL filter for that session and the report tags trades as
+`insufficient_rvol_history`.
+
+One-year comparison, same cached SPY 5-minute regular-session data, quantity
+`1`, and legacy no-minimum decision cost model:
+
+| Strategy | Cost model | Closed trades | Total PnL | Expectancy / trade | Profit factor | Max DD |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `gap-and-go-vwap-pullback` | 1 bp + `$0.005/share` | `21` | `$4.07345250` | `$0.1939739286` | `1.3347` | `-$5.57270800` |
+| `trend-day-vwap-reclaim-v3-opening-drive` | 1 bp + `$0.005/share` | `30` | `$4.74405148` | `$0.1581350493` | `1.2830` | `-$5.41768901` |
+| `trend-day-vwap-reclaim-v4-rvol-buckets` | gross | `14` | `$4.7548` | `$0.3396285714` | `1.6967` | `-$3.9201` |
+| `trend-day-vwap-reclaim-v4-rvol-buckets` | 1 bp + `$0.005/share` | `14` | `$2.67250448` | `$0.1908931771` | `1.3273` | `-$4.39700001` |
+
+Cost stress for `trend-day-vwap-reclaim-v4-rvol-buckets`:
+
+| Scenario | Total PnL | Expectancy / trade | Profit factor | Gross edge consumed |
+| --- | ---: | ---: | ---: | ---: |
+| `gross` | `$4.7548` | `$0.3396285714` | `1.6967` | `0.00x` |
+| `slippage_1bps_commission` | `$2.67250448` | `$0.1908931771` | `1.3273` | `0.44x` |
+| `ibkr_ca_fixed_1bps` | `-$25.18749552` | `-$1.7991068229` | `0.0906` | `6.30x` |
+| `ibkr_ca_tiered_1bps` | `-$6.98749552` | `-$0.4991068229` | `0.5153` | `2.47x` |
+
+Opening RVOL bucket split for `trend-day-vwap-reclaim-v4-rvol-buckets`:
+
+| Opening RVOL bucket | Closed trades | Total PnL | Expectancy / trade | Profit factor clue |
+| --- | ---: | ---: | ---: | --- |
+| `normal` (`1.00` to `<1.20`) | `9` | `$4.11921998` | `$0.4577` | Stronger bucket |
+| `active` (`1.20` to `<1.80`) | `5` | `-$1.4467155` | `-$0.2893` | Failed bucket |
+| `dead` (`<0.80`) | `0` | `$0` | `$0` | Filtered out |
+| `event_like` (`>=1.80`) | `0` | `$0` | `$0` | No completed trades |
+
+Robustness split for `trend-day-vwap-reclaim-v4-rvol-buckets` under the legacy
+no-minimum cost model:
+
+- first half: `7` trades, `-$0.56355151`, `-$0.0805` expectancy
+- second half: `7` trades, `$3.23605599`, `$0.4623` expectancy
+- best rolling 6-month window: `$3.23605599`
+- worst rolling 6-month window: `-$1.04282401`
+- event days: `1` trade, `$2.148629`, `$2.1486` expectancy
+- ordinary sessions: `13` trades, `$0.52387548`, `$0.0403` expectancy
+- weekday split: Monday `5` trades, `-$0.02546301`; Tuesday `3` trades,
+  `-$2.401405`; Thursday `4` trades, `$5.2631385`; Friday `2` trades,
+  `-$0.16376601`
+- largest trade: `$4.278880`, which is `160.11%` of total PnL
+- top 5 absolute trades: `$13.307465`, representing `70.03%` of absolute trade
+  PnL and `264.62%` of total PnL
+
+Verdict: reject the v4 RVOL filter as the next live candidate. It improves
+drawdown and per-trade expectancy, but it cuts the sample from `30` to only `14`
+trades and lowers total costed PnL from `$4.74405148` to `$2.67250448`. The
+bucket evidence is useful but not supportive of the proposed threshold:
+`normal` RVOL carries the profit while `active` RVOL loses money. The result is
+also still negative under IBKR Canada small-account minimum commission
+approximations and remains concentrated in one large trade. Keep opening RVOL as
+a reporting dimension and revisit a narrower normal-RVOL idea only after broader
+validation.
 
 ### Small Account Sizing Example
 

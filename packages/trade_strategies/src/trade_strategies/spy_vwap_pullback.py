@@ -779,3 +779,41 @@ class OpeningDriveQualityVwapReclaimStrategy(DailyContextVwapReclaimStrategy):
         if close_position < self.min_first_30_minute_close_position:
             return "opening_drive_close_position_too_weak"
         return None
+
+
+@dataclass(slots=True)
+class RvolBucketVwapReclaimStrategy(OpeningDriveQualityVwapReclaimStrategy):
+    """Opening-drive VWAP continuation candidate gated by opening RVOL.
+
+    This variant keeps the issue #44 daily context and opening-drive quality
+    gates, then replaces the earlier lenient opening-volume gate with a stricter
+    opening relative-volume threshold. The relative volume baseline uses only
+    completed prior sessions.
+    """
+
+    name: ClassVar[str] = "trend-day-vwap-reclaim-v4-rvol-buckets"
+
+    min_opening_relative_volume: Decimal = Decimal("1.00")
+    relative_volume_lookback_sessions: int = 20
+
+    def _entry_time_trend_gate_reason(
+        self,
+        *,
+        state: _SessionState,
+        bar: Bar,
+    ) -> str | None:
+        """Require minimum opening RVOL before inherited entry-time gates."""
+        daily_context_reason = self._daily_context_gate_reason()
+        if daily_context_reason is not None:
+            return daily_context_reason
+        opening_drive_reason = self._opening_drive_quality_gate_reason(state)
+        if opening_drive_reason is not None:
+            return opening_drive_reason
+        opening_rvol = self._opening_relative_volume(state)
+        if opening_rvol is not None and opening_rvol < self.min_opening_relative_volume:
+            return "opening_rvol_too_low"
+        return EntryFilteredTrendDayVwapReclaimStrategy._entry_time_trend_gate_reason(
+            self,
+            state=state,
+            bar=bar,
+        )

@@ -75,7 +75,7 @@ class ClosedTrade:
         opening_range_state: Session state after the first 30 minutes.
         opening_drive_close_position_bucket: First-30-minute close location bucket.
         trend_state: Full-session VWAP/close trend proxy.
-        relative_volume_bucket: Session volume versus trailing-session baseline.
+        relative_volume_bucket: Opening-window volume versus trailing-session baseline.
         macro_event_labels: Reporting-only scheduled macro event labels for the
             market-local exit date.
         pnl: Net realized PnL after entry/exit commissions and slippage.
@@ -1029,14 +1029,14 @@ def session_regime_tags(
     """Derive simple session tags from normalized OHLCV bars."""
     zone = ZoneInfo(timezone)
     session_bars = _bars_by_local_date(bars, timezone=timezone)
-    trailing_volumes: list[Decimal] = []
+    trailing_opening_volumes: list[Decimal] = []
     previous_close: Decimal | None = None
     tags_by_date: dict[str, SessionRegimeTags] = {}
 
     for local_date, bars_for_date in sorted(session_bars.items()):
         current_open = Decimal(str(bars_for_date[0].open))
         current_close = Decimal(str(bars_for_date[-1].close))
-        session_volume = sum((Decimal(bar.volume) for bar in bars_for_date), Decimal("0"))
+        opening_window_volume = _opening_window_volume(bars_for_date, zone=zone)
         tags_by_date[local_date] = SessionRegimeTags(
             gap_bucket=_gap_bucket(
                 current_open=current_open,
@@ -1056,12 +1056,13 @@ def session_regime_tags(
                 current_close=current_close,
             ),
             relative_volume_bucket=_relative_volume_bucket(
-                session_volume=session_volume,
-                trailing_volumes=trailing_volumes,
+                opening_window_volume=opening_window_volume,
+                trailing_opening_volumes=trailing_opening_volumes,
             ),
         )
         previous_close = current_close
-        trailing_volumes.append(session_volume)
+        if opening_window_volume is not None:
+            trailing_opening_volumes.append(opening_window_volume)
 
     return tags_by_date
 
@@ -1164,6 +1165,23 @@ def _opening_drive_close_position_bucket(
     return "0.80-1.00"
 
 
+def _opening_window_volume(
+    bars: Sequence[Bar],
+    *,
+    zone: ZoneInfo,
+) -> Decimal | None:
+    """Return completed first-30-minute session volume."""
+    opening_bars = [
+        bar
+        for bar in bars
+        if bar.timestamp_utc.astimezone(zone).time().hour == 9
+        and bar.timestamp_utc.astimezone(zone).time().minute < 60
+    ][:6]
+    if len(opening_bars) < 6:
+        return None
+    return sum((Decimal(bar.volume) for bar in opening_bars), Decimal("0"))
+
+
 def _trend_state(
     bars: Sequence[Bar],
     *,
@@ -1214,22 +1232,26 @@ def _vwap(bars: Sequence[Bar]) -> Decimal | None:
 
 def _relative_volume_bucket(
     *,
-    session_volume: Decimal,
-    trailing_volumes: Sequence[Decimal],
+    opening_window_volume: Decimal | None,
+    trailing_opening_volumes: Sequence[Decimal],
 ) -> str:
-    """Bucket session volume against the average of up to 20 prior sessions."""
-    if not trailing_volumes:
+    """Bucket opening-window RVOL against the prior 20 completed sessions."""
+    if opening_window_volume is None:
         return "unknown_relative_volume"
-    trailing_window = trailing_volumes[-20:]
+    if len(trailing_opening_volumes) < 20:
+        return "insufficient_rvol_history"
+    trailing_window = trailing_opening_volumes[-20:]
     baseline = sum(trailing_window, Decimal("0")) / Decimal(len(trailing_window))
     if baseline == 0:
         return "unknown_relative_volume"
-    relative_volume = session_volume / baseline
-    if relative_volume >= Decimal("1.2"):
-        return "high_relative_volume"
-    if relative_volume <= Decimal("0.8"):
-        return "low_relative_volume"
-    return "normal_relative_volume"
+    relative_volume = opening_window_volume / baseline
+    if relative_volume < Decimal("0.80"):
+        return "dead"
+    if relative_volume < Decimal("1.20"):
+        return "normal"
+    if relative_volume < Decimal("1.80"):
+        return "active"
+    return "event_like"
 
 
 @dataclass(frozen=True, slots=True)
