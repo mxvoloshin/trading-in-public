@@ -7,6 +7,7 @@ from collections.abc import Callable
 from trade_strategies.close_momentum import CloseMomentumStrategy
 from trade_strategies.protocols import Strategy
 from trade_strategies.spy_vwap_pullback import (
+    DailyContextVwapReclaimStrategy,
     EntryFilteredTrendDayVwapReclaimStrategy,
     GapAndGoVwapPullbackStrategy,
     SpyVwapPullbackStrategy,
@@ -23,6 +24,7 @@ _STRATEGIES: dict[str, StrategyFactory] = {
     TrendDayVwapReclaimStrategy.name: TrendDayVwapReclaimStrategy,
     EntryFilteredTrendDayVwapReclaimStrategy.name: EntryFilteredTrendDayVwapReclaimStrategy,
     GapAndGoVwapPullbackStrategy.name: GapAndGoVwapPullbackStrategy,
+    DailyContextVwapReclaimStrategy.name: DailyContextVwapReclaimStrategy,
 }
 
 

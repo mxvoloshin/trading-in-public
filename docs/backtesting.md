@@ -706,6 +706,83 @@ this as a promising research clue: modest positive gaps with normal opening
 participation are worth further study, while broad positive-gap chasing and
 high-RVOL gap sessions are not validated.
 
+Issue #43 adds `trend-day-vwap-reclaim-v2-daily-context`, a higher-timeframe
+daily trend filter on top of `trend-day-vwap-reclaim-entry-filter`:
+
+```sh
+uv run python -m trade_research_app backtest run \
+  --strategy trend-day-vwap-reclaim-v2-daily-context \
+  --symbol SPY \
+  --timeframe 5Min \
+  --start 2025-06-28 \
+  --end 2026-06-27 \
+  --market XNYS \
+  --session regular \
+  --slippage-bps 1 \
+  --commission-per-share 0.005 \
+  --minimum-commission 0
+```
+
+The strategy derives completed-daily context from completed regular-session
+closes in the normalized 5-minute stream. The current session's close is not
+used. A long entry is allowed only when:
+
+- at least `25` completed sessions are available
+- prior regular-session close is above the completed-bar `20`-session SMA
+- the current `20`-session SMA is greater than or equal to the same SMA measured
+  `5` completed sessions ago
+- the inherited entry-time trend/RVOL and VWAP reclaim gates also pass
+
+The first implementation layered this daily filter on top of
+`gap-and-go-vwap-pullback`, but that kept the existing narrow gap filter and
+reduced the sample to only `11` trades. The final issue #43 variant removes that
+gap-specific layer and tests the daily context against the broader
+entry-filtered base.
+
+One-year comparison, same cached SPY 5-minute regular-session data, quantity
+`1`, and legacy no-minimum decision cost model:
+
+| Strategy | Cost model | Closed trades | Total PnL | Expectancy / trade | Profit factor | Max DD |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `gap-and-go-vwap-pullback` | gross | `21` | `$7.1550` | `$0.3407142857` | `1.6981` | `-$5.1000` |
+| `gap-and-go-vwap-pullback` | 1 bp + `$0.005/share` | `21` | `$4.07345250` | `$0.1939739286` | `1.3347` | `-$5.57270800` |
+| `trend-day-vwap-reclaim-v2-daily-context` | gross | `37` | `$8.3898` | `$0.2267513514` | `1.4231` | `-$6.4350` |
+| `trend-day-vwap-reclaim-v2-daily-context` | 1 bp + `$0.005/share` | `37` | `$2.88858998` | `$0.0780699995` | `1.1234` | `-$7.94506601` |
+
+Cost stress for `trend-day-vwap-reclaim-v2-daily-context`:
+
+| Scenario | Total PnL | Expectancy / trade | Profit factor | Gross edge consumed |
+| --- | ---: | ---: | ---: | ---: |
+| `gross` | `$8.3898` | `$0.2267513514` | `1.4231` | `0.00x` |
+| `commission_only` | `$8.0198` | `$0.2167513514` | `1.3996` | `0.04x` |
+| `slippage_0_5bps` | `$5.824194990` | `$0.1574106754` | `1.2710` | `0.31x` |
+| `slippage_1bps` | `$3.25858998` | `$0.0880699995` | `1.1407` | `0.61x` |
+| `slippage_1bps_commission` | `$2.88858998` | `$0.0780699995` | `1.1234` | `0.66x` |
+| `slippage_2bps` | `-$1.87262004` | `-$0.0506113524` | `0.9296` | `1.22x` |
+| `ibkr_ca_fixed_1bps` | `-$70.74141002` | `-$1.9119300005` | `0.0946` | `9.43x` |
+| `ibkr_ca_tiered_1bps` | `-$22.64141002` | `-$0.6119300005` | `0.4434` | `3.70x` |
+
+Robustness split for the legacy no-minimum cost model:
+
+- first half: `19` trades, `$0.09128199`, `$0.0048` expectancy
+- second half: `18` trades, `$2.79730799`, `$0.1554` expectancy
+- best rolling 6-month window: `$3.67542749`
+- worst rolling 6-month window: `-$0.69730701`
+- event days: `5` trades, `$0.268806`, `$0.0538` expectancy
+- ordinary sessions: `32` trades, `$2.61978398`, `$0.0819` expectancy
+- largest trade: `$4.278880`, which is `148.13%` of total PnL
+- top 5 absolute trades: `$19.1337745`, representing `38.51%` of absolute trade
+  PnL and `385.15%` of total PnL
+
+Verdict: still reject the daily-context filter as the next live candidate. After
+removing the narrow gap layer, the sample improves to `37` trades and the worst
+rolling 6-month window is less negative than the prior gap/RVOL variant. However,
+costed PnL still trails `gap-and-go-vwap-pullback` (`$2.88858998` versus
+`$4.07345250`), max drawdown worsens, the first-half split is nearly flat, and
+profit remains concentrated in a small number of trades. The daily trend idea is
+useful as a reporting dimension or a broader future filter, but this version does
+not improve the current candidate.
+
 ### Small Account Sizing Example
 
 The backtest runner uses a fixed `--quantity`; it does not yet size orders from

@@ -639,3 +639,82 @@ class GapAndGoVwapPullbackStrategy(EntryFilteredTrendDayVwapReclaimStrategy):
             return parent_reason
 
         return None
+
+
+@dataclass(slots=True)
+class DailyContextVwapReclaimStrategy(EntryFilteredTrendDayVwapReclaimStrategy):
+    """Entry-filtered VWAP continuation candidate gated by completed daily trend.
+
+    The backtest currently feeds 5-minute regular-session bars, so this strategy
+    derives its daily context from completed session closes already present in
+    the stream. The current session's close is never used for the entry gate.
+    """
+
+    name: ClassVar[str] = "trend-day-vwap-reclaim-v2-daily-context"
+
+    daily_sma_period: int = 20
+    daily_sma_slope_lookback_sessions: int = 5
+    _completed_session_closes: list[Decimal] = field(
+        default_factory=_new_decimal_list,
+        init=False,
+        repr=False,
+    )
+
+    def _state_for_bar(self, bar: Bar) -> _SessionState:
+        """Record completed regular-session closes before starting a new day."""
+        local_date = bar.timestamp_utc.astimezone(NEW_YORK).date().isoformat()
+        if self._state is not None and self._state.local_date != local_date:
+            previous_bar = self._state.previous_bar
+            if previous_bar is not None:
+                self._completed_session_closes.append(Decimal(str(previous_bar.close)))
+        return EntryFilteredTrendDayVwapReclaimStrategy._state_for_bar(self, bar)
+
+    def _entry_time_trend_gate_reason(
+        self,
+        *,
+        state: _SessionState,
+        bar: Bar,
+    ) -> str | None:
+        """Require bullish completed-daily context before intraday gates."""
+        daily_context_reason = self._daily_context_gate_reason()
+        if daily_context_reason is not None:
+            return daily_context_reason
+        return EntryFilteredTrendDayVwapReclaimStrategy._entry_time_trend_gate_reason(
+            self,
+            state=state,
+            bar=bar,
+        )
+
+    def _daily_context_gate_reason(self) -> str | None:
+        """Return a reject reason when completed daily trend is not supportive."""
+        required_closes = self.daily_sma_period + self.daily_sma_slope_lookback_sessions
+        if len(self._completed_session_closes) < required_closes:
+            return "daily_context_not_ready"
+
+        prior_regular_session_close = self._completed_session_closes[-1]
+        daily_sma_20 = self._simple_moving_average(
+            closes=self._completed_session_closes,
+            end_offset=0,
+        )
+        daily_sma_20_5_sessions_ago = self._simple_moving_average(
+            closes=self._completed_session_closes,
+            end_offset=self.daily_sma_slope_lookback_sessions,
+        )
+
+        if prior_regular_session_close <= daily_sma_20:
+            return "daily_context_prior_close_below_sma"
+        if daily_sma_20 < daily_sma_20_5_sessions_ago:
+            return "daily_context_sma_not_rising"
+        return None
+
+    def _simple_moving_average(
+        self,
+        *,
+        closes: list[Decimal],
+        end_offset: int,
+    ) -> Decimal:
+        """Calculate a daily SMA from completed session closes only."""
+        end_index = len(closes) - end_offset
+        start_index = end_index - self.daily_sma_period
+        window = closes[start_index:end_index]
+        return sum(window, Decimal("0")) / Decimal(self.daily_sma_period)
