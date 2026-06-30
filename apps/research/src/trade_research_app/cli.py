@@ -184,6 +184,7 @@ def _handle_backtest_run(args: argparse.Namespace) -> int:
     print(f"profit_factor={summary.profit_factor}")
     print(f"max_drawdown={summary.max_drawdown}")
     print(f"max_drawdown_duration_trades={summary.max_drawdown_duration_trades}")
+    print(f"max_consecutive_losing_trades={summary.max_consecutive_losing_trades}")
     print(f"average_holding_minutes={summary.average_holding_minutes}")
     print(f"median_holding_minutes={summary.median_holding_minutes}")
     print(f"longest_holding_minutes={summary.longest_holding_minutes}")

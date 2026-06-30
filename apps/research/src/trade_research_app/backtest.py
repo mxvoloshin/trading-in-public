@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -238,6 +238,7 @@ class BacktestSummary:
     profit_factor: Decimal
     max_drawdown: Decimal
     max_drawdown_duration_trades: int
+    max_consecutive_losing_trades: int
     average_holding_minutes: Decimal
     median_holding_minutes: Decimal
     longest_holding_minutes: int
@@ -252,6 +253,11 @@ class BacktestSummary:
     opening_range_breakdown: dict[str, dict[str, str | int]]
     trend_breakdown: dict[str, dict[str, str | int]]
     relative_volume_breakdown: dict[str, dict[str, str | int]]
+    trade_contribution_breakdown: dict[str, dict[str, str | int]]
+    day_contribution_breakdown: dict[str, dict[str, str | int]]
+    chronological_split_breakdown: dict[str, dict[str, str | int]]
+    rolling_3_month_breakdown: dict[str, dict[str, str | int]]
+    rolling_6_month_breakdown: dict[str, dict[str, str | int]]
     output_path: Path | None
 
     def to_json_dict(self) -> dict[str, str | int | dict[str, dict[str, str | int]]]:
@@ -290,6 +296,7 @@ class BacktestSummary:
             "profit_factor": str(self.profit_factor),
             "max_drawdown": str(self.max_drawdown),
             "max_drawdown_duration_trades": self.max_drawdown_duration_trades,
+            "max_consecutive_losing_trades": self.max_consecutive_losing_trades,
             "average_holding_minutes": str(self.average_holding_minutes),
             "median_holding_minutes": str(self.median_holding_minutes),
             "longest_holding_minutes": self.longest_holding_minutes,
@@ -304,6 +311,11 @@ class BacktestSummary:
             "opening_range_breakdown": self.opening_range_breakdown,
             "trend_breakdown": self.trend_breakdown,
             "relative_volume_breakdown": self.relative_volume_breakdown,
+            "trade_contribution_breakdown": self.trade_contribution_breakdown,
+            "day_contribution_breakdown": self.day_contribution_breakdown,
+            "chronological_split_breakdown": self.chronological_split_breakdown,
+            "rolling_3_month_breakdown": self.rolling_3_month_breakdown,
+            "rolling_6_month_breakdown": self.rolling_6_month_breakdown,
         }
 
 
@@ -511,6 +523,22 @@ def run_minimal_backtest(
         closed_trades,
         tag_name="relative_volume_bucket",
     )
+    trade_contribution_breakdown = _trade_contribution_breakdown(closed_trades)
+    day_contribution_breakdown = _day_contribution_breakdown(
+        closed_trades,
+        timezone=session_config.timezone,
+    )
+    chronological_split_breakdown = _chronological_split_breakdown(closed_trades)
+    rolling_3_month_breakdown = _rolling_window_breakdown(
+        closed_trades,
+        timezone=session_config.timezone,
+        window_days=91,
+    )
+    rolling_6_month_breakdown = _rolling_window_breakdown(
+        closed_trades,
+        timezone=session_config.timezone,
+        window_days=182,
+    )
     total_execution_costs = total_commissions + total_slippage_cost
     summary = BacktestSummary(
         strategy_name=strategy.name,
@@ -555,6 +583,7 @@ def run_minimal_backtest(
         profit_factor=trade_metrics.profit_factor,
         max_drawdown=trade_metrics.max_drawdown,
         max_drawdown_duration_trades=trade_metrics.max_drawdown_duration_trades,
+        max_consecutive_losing_trades=trade_metrics.max_consecutive_losing_trades,
         average_holding_minutes=trade_metrics.average_holding_minutes,
         median_holding_minutes=trade_metrics.median_holding_minutes,
         longest_holding_minutes=trade_metrics.longest_holding_minutes,
@@ -569,6 +598,11 @@ def run_minimal_backtest(
         opening_range_breakdown=opening_range_breakdown,
         trend_breakdown=trend_breakdown,
         relative_volume_breakdown=relative_volume_breakdown,
+        trade_contribution_breakdown=trade_contribution_breakdown,
+        day_contribution_breakdown=day_contribution_breakdown,
+        chronological_split_breakdown=chronological_split_breakdown,
+        rolling_3_month_breakdown=rolling_3_month_breakdown,
+        rolling_6_month_breakdown=rolling_6_month_breakdown,
         output_path=output_path,
     )
     if output_path is not None:
@@ -1112,6 +1146,7 @@ class _TradeMetrics:
     profit_factor: Decimal
     max_drawdown: Decimal
     max_drawdown_duration_trades: int
+    max_consecutive_losing_trades: int
     average_holding_minutes: Decimal
     median_holding_minutes: Decimal
     longest_holding_minutes: int
@@ -1159,6 +1194,7 @@ def _trade_metrics(closed_trades: list[ClosedTrade]) -> _TradeMetrics:
         ),
         max_drawdown=_max_drawdown(closed_trade_pnls),
         max_drawdown_duration_trades=_max_drawdown_duration_trades(closed_trade_pnls),
+        max_consecutive_losing_trades=_max_consecutive_losing_trades(closed_trade_pnls),
         average_holding_minutes=(
             sum(holding_minutes, Decimal("0")) / Decimal(closed_trade_count)
             if closed_trade_count
@@ -1218,6 +1254,19 @@ def _max_drawdown_duration_trades(closed_trade_pnls: list[Decimal]) -> int:
         current_duration += 1
         max_duration = max(max_duration, current_duration)
     return max_duration
+
+
+def _max_consecutive_losing_trades(closed_trade_pnls: list[Decimal]) -> int:
+    """Return the longest streak of closed trades with negative PnL."""
+    current_streak = 0
+    max_streak = 0
+    for trade_pnl in closed_trade_pnls:
+        if trade_pnl < 0:
+            current_streak += 1
+            max_streak = max(max_streak, current_streak)
+            continue
+        current_streak = 0
+    return max_streak
 
 
 def _closed_trade_breakdown(
@@ -1282,6 +1331,118 @@ def _regime_breakdown(
     for trade in closed_trades:
         buckets.setdefault(str(getattr(trade, tag_name)), []).append(trade)
     return {bucket: _trade_bucket_summary(trades) for bucket, trades in sorted(buckets.items())}
+
+
+def _trade_contribution_breakdown(
+    closed_trades: list[ClosedTrade],
+) -> dict[str, dict[str, str | int]]:
+    """Report whether total PnL is concentrated in a few completed trades."""
+    return _contribution_breakdown(
+        [(f"trade_{index:04d}", trade.pnl) for index, trade in enumerate(closed_trades, start=1)]
+    )
+
+
+def _day_contribution_breakdown(
+    closed_trades: list[ClosedTrade],
+    *,
+    timezone: str,
+) -> dict[str, dict[str, str | int]]:
+    """Report whether total PnL is concentrated in a few market-local days."""
+    zone = ZoneInfo(timezone)
+    day_pnls: dict[str, Decimal] = {}
+    for trade in closed_trades:
+        local_date = trade.exited_at_utc.astimezone(zone).date().isoformat()
+        day_pnls[local_date] = day_pnls.get(local_date, Decimal("0")) + trade.pnl
+    return _contribution_breakdown(sorted(day_pnls.items()))
+
+
+def _contribution_breakdown(
+    labeled_pnls: Sequence[tuple[str, Decimal]],
+) -> dict[str, dict[str, str | int]]:
+    """Summarize top-N absolute PnL contribution for trades or sessions."""
+    total_pnl = sum((pnl for _, pnl in labeled_pnls), Decimal("0"))
+    total_absolute_pnl = sum((abs(pnl) for _, pnl in labeled_pnls), Decimal("0"))
+    ranked = sorted(labeled_pnls, key=lambda item: abs(item[1]), reverse=True)
+    return {
+        f"top_{top_n}": _contribution_bucket(
+            ranked[:top_n],
+            total_pnl=total_pnl,
+            total_absolute_pnl=total_absolute_pnl,
+        )
+        for top_n in (1, 5, 10)
+    }
+
+
+def _contribution_bucket(
+    selected: Sequence[tuple[str, Decimal]],
+    *,
+    total_pnl: Decimal,
+    total_absolute_pnl: Decimal,
+) -> dict[str, str | int]:
+    """Build one top-N concentration row using JSON-safe primitives."""
+    selected_pnl = sum((pnl for _, pnl in selected), Decimal("0"))
+    selected_absolute_pnl = sum((abs(pnl) for _, pnl in selected), Decimal("0"))
+    largest_label, largest_pnl = selected[0] if selected else ("", Decimal("0"))
+    return {
+        "count": len(selected),
+        "selected_pnl": str(selected_pnl),
+        "selected_absolute_pnl": str(selected_absolute_pnl),
+        "share_of_total_pnl": str(selected_pnl / total_pnl if total_pnl else Decimal("0")),
+        "share_of_absolute_pnl": str(
+            selected_absolute_pnl / total_absolute_pnl if total_absolute_pnl else Decimal("0")
+        ),
+        "largest_label": largest_label,
+        "largest_pnl": str(largest_pnl),
+    }
+
+
+def _chronological_split_breakdown(
+    closed_trades: list[ClosedTrade],
+) -> dict[str, dict[str, str | int]]:
+    """Split completed trades into first and second chronological halves."""
+    midpoint = (len(closed_trades) + 1) // 2
+    return {
+        "first_half": _trade_bucket_summary(closed_trades[:midpoint]),
+        "second_half": _trade_bucket_summary(closed_trades[midpoint:]),
+    }
+
+
+def _rolling_window_breakdown(
+    closed_trades: list[ClosedTrade],
+    *,
+    timezone: str,
+    window_days: int,
+) -> dict[str, dict[str, str | int]]:
+    """Summarize month-stepped rolling windows by market-local exit date."""
+    if not closed_trades:
+        return {}
+
+    zone = ZoneInfo(timezone)
+    trades_by_date = [
+        (trade.exited_at_utc.astimezone(zone).date(), trade) for trade in closed_trades
+    ]
+    first_date = min(local_date for local_date, _ in trades_by_date)
+    last_date = max(local_date for local_date, _ in trades_by_date)
+    window_start = first_date.replace(day=1)
+    windows: dict[str, dict[str, str | int]] = {}
+
+    while window_start <= last_date:
+        window_end = window_start + timedelta(days=window_days)
+        trades_in_window = [
+            trade for local_date, trade in trades_by_date if window_start <= local_date < window_end
+        ]
+        label = f"{window_start.isoformat()}_{(window_end - timedelta(days=1)).isoformat()}"
+        windows[label] = _trade_bucket_summary(trades_in_window)
+        window_start = _add_month(window_start)
+
+    return windows
+
+
+def _add_month(value: date) -> date:
+    """Return the first day of the next calendar month."""
+    if value.month == 12:
+        return date(value.year + 1, 1, 1)
+    return date(value.year, value.month + 1, 1)
 
 
 def _holding_time_bucket(holding_minutes: int) -> str:
