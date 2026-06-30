@@ -148,6 +148,7 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
         "profit_factor": "0",
         "realized_pnl": "-1.0",
         "relative_volume_breakdown": {"unknown_relative_volume": expected_trade_bucket},
+        "vwap_distance_atr_breakdown": {"unknown_vwap_distance_atr": expected_trade_bucket},
         "rolling_3_month_breakdown": {
             "2026-06-01_2026-08-30": expected_trade_bucket,
         },
@@ -436,6 +437,9 @@ def test_minimal_backtest_reports_trade_breakdowns(tmp_path: Path) -> None:
     }
     assert summary.trend_breakdown == {"chop_or_mixed": expected_trade_bucket}
     assert summary.relative_volume_breakdown == {"unknown_relative_volume": expected_trade_bucket}
+    assert summary.vwap_distance_atr_breakdown == {
+        "unknown_vwap_distance_atr": expected_trade_bucket
+    }
 
 
 def test_minimal_backtest_reports_robustness_concentration_and_splits(

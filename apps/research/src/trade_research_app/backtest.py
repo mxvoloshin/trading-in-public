@@ -76,6 +76,7 @@ class ClosedTrade:
         opening_drive_close_position_bucket: First-30-minute close location bucket.
         trend_state: Full-session VWAP/close trend proxy.
         relative_volume_bucket: Opening-window volume versus trailing-session baseline.
+        vwap_distance_atr_bucket: Signal-bar close distance above VWAP in ATR units.
         macro_event_labels: Reporting-only scheduled macro event labels for the
             market-local exit date.
         pnl: Net realized PnL after entry/exit commissions and slippage.
@@ -93,6 +94,7 @@ class ClosedTrade:
     opening_drive_close_position_bucket: str
     trend_state: str
     relative_volume_bucket: str
+    vwap_distance_atr_bucket: str
     macro_event_labels: tuple[str, ...]
     pnl: Decimal
 
@@ -262,6 +264,7 @@ class BacktestSummary:
     opening_drive_close_position_breakdown: dict[str, dict[str, str | int]]
     trend_breakdown: dict[str, dict[str, str | int]]
     relative_volume_breakdown: dict[str, dict[str, str | int]]
+    vwap_distance_atr_breakdown: dict[str, dict[str, str | int]]
     macro_event_day_breakdown: dict[str, dict[str, str | int]]
     macro_event_type_breakdown: dict[str, dict[str, str | int]]
     trade_contribution_breakdown: dict[str, dict[str, str | int]]
@@ -324,6 +327,7 @@ class BacktestSummary:
             "opening_drive_close_position_breakdown": (self.opening_drive_close_position_breakdown),
             "trend_breakdown": self.trend_breakdown,
             "relative_volume_breakdown": self.relative_volume_breakdown,
+            "vwap_distance_atr_breakdown": self.vwap_distance_atr_breakdown,
             "macro_event_day_breakdown": self.macro_event_day_breakdown,
             "macro_event_type_breakdown": self.macro_event_type_breakdown,
             "trade_contribution_breakdown": self.trade_contribution_breakdown,
@@ -430,6 +434,7 @@ def run_minimal_backtest(
                         opening_drive_close_position_bucket="unknown_opening_drive",
                         trend_state="unknown_trend",
                         relative_volume_bucket="unknown_relative_volume",
+                        vwap_distance_atr_bucket="unknown_vwap_distance_atr",
                         macro_event_labels=(),
                         pnl=trade_pnl,
                     )
@@ -517,6 +522,11 @@ def run_minimal_backtest(
         bars=bars,
         timezone=session_config.timezone,
     )
+    closed_trades = _with_vwap_distance_atr_tags(
+        closed_trades,
+        bars=bars,
+        timezone=session_config.timezone,
+    )
     closed_trades = _with_macro_event_tags(closed_trades, timezone=session_config.timezone)
     unrealized_pnl = _mark_to_market_pnl(
         position=position,
@@ -548,6 +558,10 @@ def run_minimal_backtest(
     relative_volume_breakdown = _regime_breakdown(
         closed_trades,
         tag_name="relative_volume_bucket",
+    )
+    vwap_distance_atr_breakdown = _regime_breakdown(
+        closed_trades,
+        tag_name="vwap_distance_atr_bucket",
     )
     macro_event_day_breakdown = _macro_event_day_breakdown(closed_trades)
     macro_event_type_breakdown = _macro_event_type_breakdown(closed_trades)
@@ -628,6 +642,7 @@ def run_minimal_backtest(
         opening_drive_close_position_breakdown=opening_drive_close_position_breakdown,
         trend_breakdown=trend_breakdown,
         relative_volume_breakdown=relative_volume_breakdown,
+        vwap_distance_atr_breakdown=vwap_distance_atr_breakdown,
         macro_event_day_breakdown=macro_event_day_breakdown,
         macro_event_type_breakdown=macro_event_type_breakdown,
         trade_contribution_breakdown=trade_contribution_breakdown,
@@ -1021,6 +1036,29 @@ def _with_macro_event_tags(
     return tagged_trades
 
 
+def _with_vwap_distance_atr_tags(
+    closed_trades: list[ClosedTrade],
+    *,
+    bars: Sequence[Bar],
+    timezone: str,
+) -> list[ClosedTrade]:
+    """Attach signal-bar VWAP distance in ATR buckets to each trade."""
+    zone = ZoneInfo(timezone)
+    session_bars = _bars_by_local_date(bars, timezone=timezone)
+    tagged_trades: list[ClosedTrade] = []
+    for trade in closed_trades:
+        entry_local_date = trade.entered_at_utc.astimezone(zone).date().isoformat()
+        bars_for_date = session_bars.get(entry_local_date, [])
+        signal_bars = [bar for bar in bars_for_date if bar.timestamp_utc < trade.entered_at_utc]
+        tagged_trades.append(
+            replace(
+                trade,
+                vwap_distance_atr_bucket=_vwap_distance_atr_bucket(signal_bars),
+            )
+        )
+    return tagged_trades
+
+
 def session_regime_tags(
     bars: Sequence[Bar],
     *,
@@ -1228,6 +1266,51 @@ def _vwap(bars: Sequence[Bar]) -> Decimal | None:
         Decimal("0"),
     )
     return total_price_volume / total_volume
+
+
+def _average_true_range(
+    bars: Sequence[Bar],
+    *,
+    period: int,
+) -> Decimal | None:
+    """Calculate ATR over the latest completed bars."""
+    if len(bars) < period:
+        return None
+    start_index = len(bars) - period
+    true_ranges: list[Decimal] = []
+    for index in range(start_index, len(bars)):
+        bar = bars[index]
+        high = Decimal(str(bar.high))
+        low = Decimal(str(bar.low))
+        previous_close = Decimal(str(bars[index - 1].close)) if index > 0 else None
+        true_range = (
+            high - low
+            if previous_close is None
+            else max(high - low, abs(high - previous_close), abs(low - previous_close))
+        )
+        true_ranges.append(true_range)
+    return sum(true_ranges, Decimal("0")) / Decimal(period)
+
+
+def _vwap_distance_atr_bucket(signal_bars: Sequence[Bar]) -> str:
+    """Bucket signal-bar close distance above VWAP in 20-bar ATR units."""
+    if not signal_bars:
+        return "unknown_vwap_distance_atr"
+    session_vwap = _vwap(signal_bars)
+    atr_5m_20 = _average_true_range(signal_bars, period=20)
+    if session_vwap is None or atr_5m_20 is None or atr_5m_20 == 0:
+        return "unknown_vwap_distance_atr"
+    signal_close = Decimal(str(signal_bars[-1].close))
+    distance_atr = (signal_close - session_vwap) / atr_5m_20
+    if distance_atr < 0:
+        return "below_vwap"
+    if distance_atr < Decimal("0.50"):
+        return "0.00-0.50_atr"
+    if distance_atr < Decimal("1.00"):
+        return "0.50-1.00_atr"
+    if distance_atr < Decimal("1.50"):
+        return "1.00-1.50_atr"
+    return "over_1.50_atr"
 
 
 def _relative_volume_bucket(

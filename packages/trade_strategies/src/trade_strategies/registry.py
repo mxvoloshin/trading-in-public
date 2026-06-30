@@ -8,6 +8,7 @@ from trade_strategies.close_momentum import CloseMomentumStrategy
 from trade_strategies.protocols import Strategy
 from trade_strategies.spy_vwap_pullback import (
     DailyContextVwapReclaimStrategy,
+    DynamicVwapDistanceReclaimStrategy,
     EntryFilteredTrendDayVwapReclaimStrategy,
     GapAndGoVwapPullbackStrategy,
     OpeningDriveQualityVwapReclaimStrategy,
@@ -29,6 +30,7 @@ _STRATEGIES: dict[str, StrategyFactory] = {
     DailyContextVwapReclaimStrategy.name: DailyContextVwapReclaimStrategy,
     OpeningDriveQualityVwapReclaimStrategy.name: OpeningDriveQualityVwapReclaimStrategy,
     RvolBucketVwapReclaimStrategy.name: RvolBucketVwapReclaimStrategy,
+    DynamicVwapDistanceReclaimStrategy.name: DynamicVwapDistanceReclaimStrategy,
 }
 
 
