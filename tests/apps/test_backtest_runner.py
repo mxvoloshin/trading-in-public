@@ -236,11 +236,14 @@ def test_default_cost_stress_scenarios_cover_slippage_and_commissions() -> None:
         "slippage_3bps",
         "slippage_5bps",
         "slippage_1bps_commission",
-        "slippage_1bps_commission_min_1",
+        "ibkr_ca_fixed_1bps",
+        "ibkr_ca_tiered_1bps",
     ]
     assert scenarios[4].cost_model.slippage_bps == Decimal("1")
     assert scenarios[8].cost_model.commission_per_share == Decimal("0.005")
     assert scenarios[9].cost_model.minimum_commission == Decimal("1")
+    assert scenarios[10].cost_model.commission_per_share == Decimal("0.0035")
+    assert scenarios[10].cost_model.minimum_commission == Decimal("0.35")
 
 
 def test_cost_stress_report_writes_compact_scenario_rows(tmp_path: Path) -> None:
