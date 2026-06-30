@@ -9,6 +9,7 @@ from trade_strategies.protocols import Strategy
 from trade_strategies.spy_vwap_pullback import (
     SpyVwapPullbackStrategy,
     SymmetricSpyVwapPullbackStrategy,
+    TrendDayVwapReclaimStrategy,
 )
 
 StrategyFactory = Callable[[], Strategy]
@@ -17,6 +18,7 @@ _STRATEGIES: dict[str, StrategyFactory] = {
     CloseMomentumStrategy.name: CloseMomentumStrategy,
     SpyVwapPullbackStrategy.name: SpyVwapPullbackStrategy,
     SymmetricSpyVwapPullbackStrategy.name: SymmetricSpyVwapPullbackStrategy,
+    TrendDayVwapReclaimStrategy.name: TrendDayVwapReclaimStrategy,
 }
 
 

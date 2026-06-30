@@ -37,6 +37,8 @@ class _SessionState:
     trades_entered: int = 0
     pullback_low: Decimal | None = None
     pullback_high: Decimal | None = None
+    signal_bar_low: Decimal | None = None
+    consecutive_closes_below_vwap: int = 0
 
 
 @dataclass(slots=True)
@@ -339,3 +341,89 @@ class SymmetricSpyVwapPullbackStrategy(SpyVwapPullbackStrategy):
 
     name: ClassVar[str] = "spy-vwap-pullback-long-short"
     allow_short: ClassVar[bool] = True
+
+
+@dataclass(slots=True)
+class TrendDayVwapReclaimStrategy(SpyVwapPullbackStrategy):
+    """Long-only trend-day VWAP reclaim candidate.
+
+    This variant narrows the original pullback idea. It looks for an established
+    intraday uptrend, waits for a VWAP retest, and enters only when price
+    reclaims VWAP with renewed upside momentum. It remains a research candidate,
+    not a live-trading approval.
+    """
+
+    name: ClassVar[str] = "trend-day-vwap-reclaim"
+
+    max_trades_per_day: int = 1
+    no_new_entries_before: time = time(10, 0)
+    no_new_entries_after: time = time(14, 30)
+    flatten_from: time = time(15, 45)
+
+    def _long_entry_decision(
+        self,
+        *,
+        state: _SessionState,
+        bar: Bar,
+    ) -> tuple[DecisionAction, str]:
+        """Request a long only after a trend-day VWAP retest/reclaim."""
+        current_vwap = _required_decimal(state.current_vwap, "current_vwap")
+        previous_vwap = _required_decimal(state.previous_vwap, "previous_vwap")
+        opening_range_high = _required_decimal(
+            state.opening_range_high,
+            "opening_range_high",
+        )
+        previous_bar = _required_bar(state.previous_bar)
+
+        previous_low = Decimal(str(previous_bar.low))
+        previous_close = Decimal(str(previous_bar.close))
+        current_close = Decimal(str(bar.close))
+        current_low = Decimal(str(bar.low))
+
+        retested_vwap = previous_low <= previous_vwap * (Decimal("1") + self.pullback_tolerance)
+        reclaimed_vwap = (
+            current_low <= current_vwap * (Decimal("1") + self.pullback_tolerance)
+            and current_close > current_vwap
+        )
+        trend_day_context = current_close > opening_range_high and current_vwap > previous_vwap
+        momentum_resumed = current_close > previous_close
+
+        if retested_vwap and reclaimed_vwap and trend_day_context and momentum_resumed:
+            state.trades_entered += 1
+            state.signal_bar_low = Decimal(str(bar.low))
+            state.consecutive_closes_below_vwap = 0
+            return DecisionAction.ENTER_LONG, "trend_day_vwap_reclaim"
+
+        return DecisionAction.HOLD, "trend_day_reclaim_filter_not_met"
+
+    def _open_long_decision(
+        self,
+        *,
+        state: _SessionState,
+        bar: Bar,
+    ) -> tuple[DecisionAction, str]:
+        """Exit trend-day reclaim trades on VWAP loss, signal failure, or EOD."""
+        local_time = bar.timestamp_utc.astimezone(NEW_YORK).time()
+        current_close = Decimal(str(bar.close))
+        current_vwap = _required_decimal(state.current_vwap, "current_vwap")
+
+        if local_time >= self.flatten_from:
+            return DecisionAction.EXIT_LONG, "end_of_day_flatten"
+        if state.signal_bar_low is not None and current_close < state.signal_bar_low:
+            return DecisionAction.EXIT_LONG, "close_below_signal_bar_low"
+
+        if current_close < current_vwap:
+            state.consecutive_closes_below_vwap += 1
+            if state.consecutive_closes_below_vwap >= 2:
+                return DecisionAction.EXIT_LONG, "two_closes_below_vwap"
+            return DecisionAction.HOLD, "first_close_below_vwap"
+
+        state.consecutive_closes_below_vwap = 0
+        return DecisionAction.HOLD, "trend_day_reclaim_still_valid"
+
+    def _has_entry_context(self, *, state: _SessionState, bar: Bar) -> bool:
+        """Return whether the trend-day candidate can consider a new entry."""
+        local_time = bar.timestamp_utc.astimezone(NEW_YORK).time()
+        if local_time < self.no_new_entries_before:
+            return False
+        return SpyVwapPullbackStrategy._has_entry_context(self, state=state, bar=bar)
