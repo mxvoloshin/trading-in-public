@@ -108,6 +108,10 @@ The JSON summary also includes research diagnostics for completed trades:
 - exit-reason breakdowns
 - holding-time PnL buckets
 - gap, opening-range, trend/chop, and relative-volume regime breakdowns
+- max consecutive losing trades
+- top trade/day contribution concentration
+- first-half versus second-half chronological split summaries
+- month-stepped rolling 3-month and 6-month summaries
 - same-session post-exit max favorable move, measured from each simulated exit
   fill to the later session high for the same long-side position
 
@@ -393,6 +397,40 @@ edge:
 | `slippage_0_5bps` | `$21.285110355` | `$0.0484854450` | `1.0711` | `$29.813789645` | `0.58x` |
 | `slippage_1bps` | `-$8.52867929` | `-$0.0194275155` | `0.9734` | `$59.62757929` | `1.17x` |
 | `slippage_1bps_commission` | `-$12.91867929` | `-$0.0294275155` | `0.9600` | `$64.01757929` | `1.25x` |
+
+The robustness diagnostics keep both variants below the bar for live or
+paper/live validation.
+
+For the costed long-only baseline:
+
+- first half: `139` trades, `-$18.74215101`, `-$0.1348` expectancy
+- second half: `139` trades, `-$19.52579995`, `-$0.1405` expectancy
+- max consecutive losing trades: `9`
+- largest single trade: `$10.265437`, which is `26.83%` of the final loss in
+  the opposite direction and `2.92%` of absolute trade PnL
+- top 10 absolute trades: `$42.18432706`, enough to offset `110.23%` of the
+  final loss, but only `14.25%` of absolute trade PnL
+- rolling 3-month windows are mostly negative; the best tested window,
+  `2026-03-01_2026-05-30`, is only `$3.91798766`, while the worst
+  `2025-12-01_2026-03-01` window is `-$20.14366155`
+
+For the costed symmetric long/short candidate:
+
+- first half: `220` trades, `$3.74328347`, `$0.0170` expectancy
+- second half: `219` trades, `-$16.66196276`, `-$0.0761` expectancy
+- max consecutive losing trades: `15`
+- largest single trade: `$19.527631`, which offsets `151.16%` of the final
+  loss but is only `3.08%` of absolute trade PnL
+- top 10 absolute trades: `$96.62824263`, all net positive, offsetting `747.97%`
+  of the final loss while representing only `15.25%` of absolute trade PnL
+- rolling 6-month windows swing from `$8.76344093` to `-$26.63917923`, so the
+  result is not chronologically stable
+
+Kill-criteria interpretation: any next candidate must show positive net
+expectancy after the mild cost model, avoid relying on a handful of large trend
+captures to rescue many small losses, and remain positive across at least the
+first/second chronological split plus the main 3-month and 6-month windows. If
+those diagnostics fail, the research result should be rejected instead of tuned.
 
 Verdict: this first mechanical VWAP-pullback version is not live-ready. The
 gross edge is effectively flat before commissions, spread, slippage, missed
