@@ -14,6 +14,7 @@ from trade_strategies.spy_vwap_pullback import (
     OpeningDriveQualityVwapReclaimStrategy,
     RvolBucketVwapReclaimStrategy,
     SpyVwapPullbackStrategy,
+    SpyVwapTrendContinuationLongShortBaseStrategy,
     SymmetricSpyVwapPullbackStrategy,
     TrendDayVwapReclaimStrategy,
 )
@@ -31,6 +32,9 @@ _STRATEGIES: dict[str, StrategyFactory] = {
     OpeningDriveQualityVwapReclaimStrategy.name: OpeningDriveQualityVwapReclaimStrategy,
     RvolBucketVwapReclaimStrategy.name: RvolBucketVwapReclaimStrategy,
     DynamicVwapDistanceReclaimStrategy.name: DynamicVwapDistanceReclaimStrategy,
+    SpyVwapTrendContinuationLongShortBaseStrategy.name: (
+        SpyVwapTrendContinuationLongShortBaseStrategy
+    ),
 }
 
 
