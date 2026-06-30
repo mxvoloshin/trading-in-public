@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -12,6 +13,7 @@ from trade_core import (
 )
 from trade_data import Bar
 from trade_strategies import (
+    DailyContextVwapReclaimStrategy,
     EntryFilteredTrendDayVwapReclaimStrategy,
     GapAndGoVwapPullbackStrategy,
     SpyVwapPullbackStrategy,
@@ -339,6 +341,88 @@ def test_gap_and_go_vwap_pullback_rejects_wide_opening_range() -> None:
     assert "gap_and_go_opening_range_too_wide" in decisions[-1].reason
 
 
+def test_daily_context_vwap_reclaim_enters_when_completed_daily_trend_supports() -> None:
+    strategy = DailyContextVwapReclaimStrategy(
+        max_entry_distance_from_vwap=Decimal("0.03"),
+    )
+
+    _seed_completed_daily_closes(strategy, closes=[75.6 + index for index in range(25)])
+    current_day = _trend_day_reclaim_setup_bars(day=26)
+    decisions = _decisions_for_bars(strategy, current_day, position_quantity=Decimal("0"))
+
+    assert decisions[-1].action == DecisionAction.ENTER_LONG
+    assert decisions[-1].strategy_name == "trend-day-vwap-reclaim-v2-daily-context"
+    assert "trend_day_vwap_reclaim" in decisions[-1].reason
+
+
+def test_daily_context_vwap_reclaim_waits_for_enough_completed_daily_history() -> None:
+    strategy = DailyContextVwapReclaimStrategy(
+        max_entry_distance_from_vwap=Decimal("0.03"),
+    )
+
+    _seed_completed_daily_closes(strategy, closes=[75.6 + index for index in range(24)])
+    current_day = _trend_day_reclaim_setup_bars(day=26)
+    decisions = _decisions_for_bars(strategy, current_day, position_quantity=Decimal("0"))
+
+    assert decisions[-1].action == DecisionAction.HOLD
+    assert "daily_context_not_ready" in decisions[-1].reason
+
+
+def test_daily_context_vwap_reclaim_rejects_prior_close_below_daily_sma() -> None:
+    strategy = DailyContextVwapReclaimStrategy(
+        max_entry_distance_from_vwap=Decimal("0.03"),
+    )
+
+    _seed_completed_daily_closes(strategy, closes=[100 + index for index in range(24)] + [90])
+    current_day = _trend_day_reclaim_setup_bars(day=26)
+    decisions = _decisions_for_bars(strategy, current_day, position_quantity=Decimal("0"))
+
+    assert decisions[-1].action == DecisionAction.HOLD
+    assert "daily_context_prior_close_below_sma" in decisions[-1].reason
+
+
+def test_daily_context_vwap_reclaim_rejects_falling_daily_sma() -> None:
+    strategy = DailyContextVwapReclaimStrategy(
+        max_entry_distance_from_vwap=Decimal("0.03"),
+    )
+
+    _seed_completed_daily_closes(
+        strategy,
+        closes=[
+            140,
+            140,
+            140,
+            140,
+            140,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            105,
+        ],
+    )
+    current_day = _trend_day_reclaim_setup_bars(day=26)
+    decisions = _decisions_for_bars(strategy, current_day, position_quantity=Decimal("0"))
+
+    assert decisions[-1].action == DecisionAction.HOLD
+    assert "daily_context_sma_not_rising" in decisions[-1].reason
+
+
 def test_spy_vwap_pullback_respects_max_daily_trades() -> None:
     strategy = SpyVwapPullbackStrategy(max_trades_per_day=1)
     first_setup = (
@@ -409,6 +493,12 @@ def test_strategy_registry_returns_gap_and_go_vwap_pullback() -> None:
     assert strategy.name == "gap-and-go-vwap-pullback"
 
 
+def test_strategy_registry_returns_daily_context_vwap_reclaim() -> None:
+    strategy = get_strategy("trend-day-vwap-reclaim-v2-daily-context")
+
+    assert strategy.name == "trend-day-vwap-reclaim-v2-daily-context"
+
+
 def _decisions_for_bars(
     strategy: SpyVwapPullbackStrategy | SymmetricSpyVwapPullbackStrategy,
     bars: tuple[Bar, ...],
@@ -443,6 +533,25 @@ def _trend_day_reclaim_setup_bars(*, day: int = 26, volume: int = 1_000) -> tupl
         _bar(index=6, open=104.0, high=104.0, low=102.0, close=103.0, day=day, volume=volume),
         _bar(index=7, open=103.5, high=105.2, low=101.0, close=105.0, day=day, volume=volume),
     )
+
+
+def _seed_completed_daily_closes(
+    strategy: DailyContextVwapReclaimStrategy,
+    *,
+    closes: Sequence[float],
+) -> None:
+    for day_offset, close in enumerate(closes, start=1):
+        bars = (
+            _bar(
+                index=0,
+                open=close - 1,
+                high=close + 1,
+                low=close - 2,
+                close=close,
+                day=day_offset,
+            ),
+        )
+        _decisions_for_bars(strategy, bars, position_quantity=Decimal("0"))
 
 
 def _context(
