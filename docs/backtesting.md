@@ -112,6 +112,7 @@ The JSON summary also includes research diagnostics for completed trades:
 - top trade/day contribution concentration
 - first-half versus second-half chronological split summaries
 - month-stepped rolling 3-month and 6-month summaries
+- scheduled macro event-day versus ordinary-session breakdowns
 - same-session post-exit max favorable move, measured from each simulated exit
   fill to the later session high for the same long-side position
 
@@ -124,6 +125,28 @@ The first regime tags are reporting-only diagnostics:
   split `trend_up`, `trend_down`, and `chop_or_mixed` sessions.
 - `relative_volume_breakdown` compares session volume to the trailing 20-session
   average when enough prior sessions exist.
+
+The macro event tags are also reporting-only diagnostics:
+
+- `macro_event_day_breakdown` splits completed trades into `event_day` and
+  `ordinary_session`.
+- `macro_event_type_breakdown` groups trades by `cpi`, `ppi`,
+  `employment_situation`, and `fomc_statement`. A trade can appear in more than
+  one event-type bucket when two events fall on the same session.
+- The first fixture lives in `trade_research_app.macro_events` and is manually
+  maintained from public sources: BLS release calendars for CPI/PPI/Employment
+  Situation and the Federal Reserve FOMC calendar.
+- Source calendars:
+  - BLS 2025 release calendar:
+    <https://www.bls.gov/schedule/2025/home.htm>
+  - BLS 2026 release calendar:
+    <https://www.bls.gov/schedule/2026/home.htm>
+  - Federal Reserve FOMC calendar:
+    <https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm>
+
+To update the macro fixture, edit the public-safe event list in
+`apps/research/src/trade_research_app/macro_events.py`, add or update tests, and
+rerun the backtest summary. Do not connect this to a private calendar or account.
 
 ## SPY VWAP Pullback Candidate
 
@@ -431,6 +454,23 @@ expectancy after the mild cost model, avoid relying on a handful of large trend
 captures to rescue many small losses, and remain positive across at least the
 first/second chronological split plus the main 3-month and 6-month windows. If
 those diagnostics fail, the research result should be rejected instead of tuned.
+
+The macro event split adds another caution:
+
+| Strategy | Bucket | Trades | Total PnL | Expectancy |
+| --- | ---: | ---: | ---: | ---: |
+| `spy-vwap-pullback` | Event days | `39` | `-$15.54924885` | `-$0.3987` |
+| `spy-vwap-pullback` | Ordinary sessions | `239` | `-$22.71870211` | `-$0.0951` |
+| `spy-vwap-pullback-long-short` | Event days | `69` | `$8.18227237` | `$0.1186` |
+| `spy-vwap-pullback-long-short` | Ordinary sessions | `370` | `-$21.10095166` | `-$0.0570` |
+
+The long-only baseline gets materially worse on event days, especially FOMC
+statement sessions (`8` trades, `-$8.56993459`). The symmetric long/short
+candidate is positive on tagged event days, helped most by Employment Situation
+sessions (`18` trades, `$19.2062295`), but it still loses on ordinary sessions.
+That is not enough to promote event-day trading; it means future candidates
+should report event-day and ordinary-session results separately before any
+paper/live validation.
 
 Verdict: this first mechanical VWAP-pullback version is not live-ready. The
 gross edge is effectively flat before commissions, spread, slippage, missed

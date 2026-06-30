@@ -27,6 +27,8 @@ from trade_data import Bar, HistoricalBarsRequest, LocalMarketDataStore
 from trade_data.sessions import get_market_session_config
 from trade_strategies import Strategy, StrategyDecisionContext
 
+from trade_research_app.macro_events import default_macro_event_calendar
+
 
 @dataclass(frozen=True, slots=True)
 class SimulatedFill:
@@ -73,6 +75,8 @@ class ClosedTrade:
         opening_range_state: Session state after the first 30 minutes.
         trend_state: Full-session VWAP/close trend proxy.
         relative_volume_bucket: Session volume versus trailing-session baseline.
+        macro_event_labels: Reporting-only scheduled macro event labels for the
+            market-local exit date.
         pnl: Net realized PnL after entry/exit commissions and slippage.
     """
 
@@ -87,6 +91,7 @@ class ClosedTrade:
     opening_range_state: str
     trend_state: str
     relative_volume_bucket: str
+    macro_event_labels: tuple[str, ...]
     pnl: Decimal
 
     @property
@@ -253,6 +258,8 @@ class BacktestSummary:
     opening_range_breakdown: dict[str, dict[str, str | int]]
     trend_breakdown: dict[str, dict[str, str | int]]
     relative_volume_breakdown: dict[str, dict[str, str | int]]
+    macro_event_day_breakdown: dict[str, dict[str, str | int]]
+    macro_event_type_breakdown: dict[str, dict[str, str | int]]
     trade_contribution_breakdown: dict[str, dict[str, str | int]]
     day_contribution_breakdown: dict[str, dict[str, str | int]]
     chronological_split_breakdown: dict[str, dict[str, str | int]]
@@ -311,6 +318,8 @@ class BacktestSummary:
             "opening_range_breakdown": self.opening_range_breakdown,
             "trend_breakdown": self.trend_breakdown,
             "relative_volume_breakdown": self.relative_volume_breakdown,
+            "macro_event_day_breakdown": self.macro_event_day_breakdown,
+            "macro_event_type_breakdown": self.macro_event_type_breakdown,
             "trade_contribution_breakdown": self.trade_contribution_breakdown,
             "day_contribution_breakdown": self.day_contribution_breakdown,
             "chronological_split_breakdown": self.chronological_split_breakdown,
@@ -414,6 +423,7 @@ def run_minimal_backtest(
                         opening_range_state="unknown_opening_range",
                         trend_state="unknown_trend",
                         relative_volume_bucket="unknown_relative_volume",
+                        macro_event_labels=(),
                         pnl=trade_pnl,
                     )
                 )
@@ -500,6 +510,7 @@ def run_minimal_backtest(
         bars=bars,
         timezone=session_config.timezone,
     )
+    closed_trades = _with_macro_event_tags(closed_trades, timezone=session_config.timezone)
     unrealized_pnl = _mark_to_market_pnl(
         position=position,
         average_entry_price=average_entry_price,
@@ -523,6 +534,8 @@ def run_minimal_backtest(
         closed_trades,
         tag_name="relative_volume_bucket",
     )
+    macro_event_day_breakdown = _macro_event_day_breakdown(closed_trades)
+    macro_event_type_breakdown = _macro_event_type_breakdown(closed_trades)
     trade_contribution_breakdown = _trade_contribution_breakdown(closed_trades)
     day_contribution_breakdown = _day_contribution_breakdown(
         closed_trades,
@@ -598,6 +611,8 @@ def run_minimal_backtest(
         opening_range_breakdown=opening_range_breakdown,
         trend_breakdown=trend_breakdown,
         relative_volume_breakdown=relative_volume_breakdown,
+        macro_event_day_breakdown=macro_event_day_breakdown,
+        macro_event_type_breakdown=macro_event_type_breakdown,
         trade_contribution_breakdown=trade_contribution_breakdown,
         day_contribution_breakdown=day_contribution_breakdown,
         chronological_split_breakdown=chronological_split_breakdown,
@@ -949,6 +964,30 @@ def _with_regime_tags(
                 opening_range_state=tags.opening_range_state,
                 trend_state=tags.trend_state,
                 relative_volume_bucket=tags.relative_volume_bucket,
+            )
+        )
+    return tagged_trades
+
+
+def _with_macro_event_tags(
+    closed_trades: list[ClosedTrade],
+    *,
+    timezone: str,
+) -> list[ClosedTrade]:
+    """Attach scheduled macro event tags to each completed trade.
+
+    The lookup is intentionally applied after fills are complete. That keeps the
+    fixture as research context instead of a hidden strategy input.
+    """
+    zone = ZoneInfo(timezone)
+    calendar = default_macro_event_calendar()
+    tagged_trades: list[ClosedTrade] = []
+    for trade in closed_trades:
+        local_date = trade.exited_at_utc.astimezone(zone).date()
+        tagged_trades.append(
+            replace(
+                trade,
+                macro_event_labels=calendar.labels_for_date(local_date),
             )
         )
     return tagged_trades
@@ -1330,6 +1369,39 @@ def _regime_breakdown(
     buckets: dict[str, list[ClosedTrade]] = {}
     for trade in closed_trades:
         buckets.setdefault(str(getattr(trade, tag_name)), []).append(trade)
+    return {bucket: _trade_bucket_summary(trades) for bucket, trades in sorted(buckets.items())}
+
+
+def _macro_event_day_breakdown(
+    closed_trades: list[ClosedTrade],
+) -> dict[str, dict[str, str | int]]:
+    """Split completed trades by whether the exit session had a macro event."""
+    buckets: dict[str, list[ClosedTrade]] = {
+        "event_day": [],
+        "ordinary_session": [],
+    }
+    for trade in closed_trades:
+        bucket = "event_day" if trade.macro_event_labels else "ordinary_session"
+        buckets[bucket].append(trade)
+    return {bucket: _trade_bucket_summary(trades) for bucket, trades in sorted(buckets.items())}
+
+
+def _macro_event_type_breakdown(
+    closed_trades: list[ClosedTrade],
+) -> dict[str, dict[str, str | int]]:
+    """Group completed trades by scheduled macro event type.
+
+    A trade can appear in more than one event-type bucket when two releases fall
+    on the same session, so use `macro_event_day_breakdown` for mutually
+    exclusive event-day versus ordinary-session totals.
+    """
+    buckets: dict[str, list[ClosedTrade]] = {"ordinary_session": []}
+    for trade in closed_trades:
+        if not trade.macro_event_labels:
+            buckets["ordinary_session"].append(trade)
+            continue
+        for label in trade.macro_event_labels:
+            buckets.setdefault(label, []).append(trade)
     return {bucket: _trade_bucket_summary(trades) for bucket, trades in sorted(buckets.items())}
 
 
