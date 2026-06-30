@@ -157,6 +157,10 @@ The first regime tags are reporting-only diagnostics:
   the trailing 20 completed-session average and buckets it as
   `dead`, `normal`, `active`, or `event_like`. Sessions before enough prior
   opening windows exist are reported as `insufficient_rvol_history`.
+- `vwap_distance_atr_breakdown` buckets the signal-bar close distance above
+  VWAP in 20-bar 5-minute ATR units. It uses the signal bar that created the
+  next-bar-open fill, so the diagnostic matches the entry decision rather than
+  the later fill bar.
 
 The macro event tags are also reporting-only diagnostics:
 
@@ -982,6 +986,94 @@ also still negative under IBKR Canada small-account minimum commission
 approximations and remains concentrated in one large trade. Keep opening RVOL as
 a reporting dimension and revisit a narrower normal-RVOL idea only after broader
 validation.
+
+Issue #46 adds `trend-day-vwap-reclaim-v5-dynamic-vwap-distance`, an
+ATR-normalized VWAP distance filter on top of
+`trend-day-vwap-reclaim-v4-rvol-buckets`:
+
+```sh
+uv run python -m trade_research_app backtest run \
+  --strategy trend-day-vwap-reclaim-v5-dynamic-vwap-distance \
+  --symbol SPY \
+  --timeframe 5Min \
+  --start 2025-06-28 \
+  --end 2026-06-27 \
+  --market XNYS \
+  --session regular \
+  --slippage-bps 1 \
+  --commission-per-share 0.005 \
+  --minimum-commission 0
+```
+
+The strategy keeps the completed-daily context, opening-drive quality,
+opening-RVOL gate, and VWAP reclaim entry/exit rules unchanged. It replaces the
+fixed `0.6%` VWAP extension cap with:
+
+```text
+atr_5m_20 = average true range over the latest 20 completed 5-minute bars
+vwap_distance = entry_close - session_vwap
+max_allowed_distance = 1.0 * atr_5m_20
+
+entry_allowed =
+  vwap_distance >= 0
+  and vwap_distance <= max_allowed_distance
+```
+
+If fewer than `20` completed 5-minute bars exist in the current session, the
+strategy treats ATR as not ready and skips the entry.
+
+One-year comparison, same cached SPY 5-minute regular-session data, quantity
+`1`, and legacy no-minimum decision cost model:
+
+| Strategy | Cost model | Closed trades | Total PnL | Expectancy / trade | Profit factor | Max DD |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `gap-and-go-vwap-pullback` | 1 bp + `$0.005/share` | `21` | `$4.07345250` | `$0.1939739286` | `1.3347` | `-$5.57270800` |
+| `trend-day-vwap-reclaim-v4-rvol-buckets` | 1 bp + `$0.005/share` | `14` | `$2.67250448` | `$0.1908931771` | `1.3273` | `-$4.39700001` |
+| `trend-day-vwap-reclaim-v5-dynamic-vwap-distance` | gross | `7` | `$2.01` | `$0.2871428571` | `1.8777` | `-$1.64` |
+| `trend-day-vwap-reclaim-v5-dynamic-vwap-distance` | 1 bp + `$0.005/share` | `7` | `$0.985563` | `$0.1407947143` | `1.3254` | `-$2.217118` |
+
+Cost stress for `trend-day-vwap-reclaim-v5-dynamic-vwap-distance`:
+
+| Scenario | Total PnL | Expectancy / trade | Profit factor | Gross edge consumed |
+| --- | ---: | ---: | ---: | ---: |
+| `gross` | `$2.01` | `$0.2871428571` | `1.8777` | `0.00x` |
+| `slippage_1bps_commission` | `$0.985563` | `$0.1407947143` | `1.3254` | `0.51x` |
+| `ibkr_ca_fixed_1bps` | `-$12.944437` | `-$1.8492052857` | `0.0086` | `7.44x` |
+| `ibkr_ca_tiered_1bps` | `-$3.844437` | `-$0.5492052857` | `0.4066` | `2.91x` |
+
+ATR-distance bucket split for `trend-day-vwap-reclaim-v5-dynamic-vwap-distance`
+under the legacy no-minimum cost model:
+
+| Distance bucket | Closed trades | Total PnL | Expectancy / trade |
+| --- | ---: | ---: | ---: |
+| `0.00-0.50_atr` | `2` | `-$0.824606` | `-$0.4123` |
+| `0.50-1.00_atr` | `5` | `$1.810169` | `$0.3620` |
+| `1.00-1.50_atr` | `0` | `$0` | `$0` |
+| `over_1.50_atr` | `0` | `$0` | `$0` |
+
+Robustness split for `trend-day-vwap-reclaim-v5-dynamic-vwap-distance` under
+the legacy no-minimum cost model:
+
+- first half: `4` trades, `$0.300723`, `$0.0752` expectancy
+- second half: `3` trades, `$0.684840`, `$0.2283` expectancy
+- best rolling 6-month window: `$1.796960`
+- worst rolling 6-month window: `-$0.811397`
+- event days: `0` trades, `$0`
+- ordinary sessions: `7` trades, `$0.985563`, `$0.1408` expectancy
+- weekday split: Monday `1` trade, `-$0.412051`; Tuesday `3` trades,
+  `$3.408506`; Thursday `2` trades, `-$1.199495`; Friday `1` trade,
+  `-$0.811397`
+- largest trade: `$2.101809`, which is `213.26%` of total PnL
+- top 5 absolute trades: `$6.217987`, representing `88.29%` of absolute trade
+  PnL and `183.67%` of total PnL
+
+Verdict: reject the dynamic VWAP distance filter as the next live candidate. It
+reduces drawdown, but it cuts the already-small v4 sample from `14` to `7`
+trades and lowers total costed PnL from `$2.67250448` to `$0.985563`. The
+distance buckets are also not enough evidence for the ATR rule: all completed
+trades land below `1.0 ATR`, and the profitable bucket is only `5` trades. Keep
+ATR distance as a useful reporting dimension, but do not carry this as the live
+candidate.
 
 ### Small Account Sizing Example
 

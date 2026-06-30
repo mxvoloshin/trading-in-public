@@ -14,6 +14,7 @@ from trade_core import (
 from trade_data import Bar
 from trade_strategies import (
     DailyContextVwapReclaimStrategy,
+    DynamicVwapDistanceReclaimStrategy,
     EntryFilteredTrendDayVwapReclaimStrategy,
     GapAndGoVwapPullbackStrategy,
     OpeningDriveQualityVwapReclaimStrategy,
@@ -542,6 +543,55 @@ def test_rvol_bucket_vwap_reclaim_skips_rvol_filter_until_history_exists() -> No
     assert "trend_day_vwap_reclaim" in decisions[-1].reason
 
 
+def test_dynamic_vwap_distance_reclaim_enters_when_atr_distance_passes() -> None:
+    strategy = DynamicVwapDistanceReclaimStrategy(
+        atr_period_5m=2,
+        max_vwap_distance_atr_multiple=Decimal("3.0"),
+        relative_volume_lookback_sessions=1,
+    )
+
+    _seed_completed_daily_closes(strategy, closes=[75.6 + index for index in range(25)])
+    prior_day = _trend_day_reclaim_setup_bars(day=25, volume=1_000)
+    current_day = _trend_day_reclaim_setup_bars(day=26, volume=1_100)
+    _decisions_for_bars(strategy, prior_day, position_quantity=Decimal("0"))
+    decisions = _decisions_for_bars(strategy, current_day, position_quantity=Decimal("0"))
+
+    assert decisions[-1].action == DecisionAction.ENTER_LONG
+    assert decisions[-1].strategy_name == "trend-day-vwap-reclaim-v5-dynamic-vwap-distance"
+    assert "trend_day_vwap_reclaim" in decisions[-1].reason
+
+
+def test_dynamic_vwap_distance_reclaim_rejects_entries_too_far_above_vwap() -> None:
+    strategy = DynamicVwapDistanceReclaimStrategy(
+        atr_period_5m=2,
+        max_vwap_distance_atr_multiple=Decimal("0.01"),
+        relative_volume_lookback_sessions=1,
+    )
+
+    _seed_completed_daily_closes(strategy, closes=[75.6 + index for index in range(25)])
+    prior_day = _trend_day_reclaim_setup_bars(day=25, volume=1_000)
+    current_day = _trend_day_reclaim_setup_bars(day=26, volume=1_100)
+    _decisions_for_bars(strategy, prior_day, position_quantity=Decimal("0"))
+    decisions = _decisions_for_bars(strategy, current_day, position_quantity=Decimal("0"))
+
+    assert decisions[-1].action == DecisionAction.HOLD
+    assert "dynamic_vwap_distance_too_extended" in decisions[-1].reason
+
+
+def test_dynamic_vwap_distance_reclaim_waits_for_atr_history() -> None:
+    strategy = DynamicVwapDistanceReclaimStrategy(
+        atr_period_5m=20,
+        max_entry_distance_from_vwap=Decimal("0.03"),
+    )
+
+    _seed_completed_daily_closes(strategy, closes=[75.6 + index for index in range(25)])
+    current_day = _trend_day_reclaim_setup_bars(day=26)
+    decisions = _decisions_for_bars(strategy, current_day, position_quantity=Decimal("0"))
+
+    assert decisions[-1].action == DecisionAction.HOLD
+    assert "dynamic_vwap_distance_atr_not_ready" in decisions[-1].reason
+
+
 def test_spy_vwap_pullback_respects_max_daily_trades() -> None:
     strategy = SpyVwapPullbackStrategy(max_trades_per_day=1)
     first_setup = (
@@ -628,6 +678,12 @@ def test_strategy_registry_returns_rvol_bucket_vwap_reclaim() -> None:
     strategy = get_strategy("trend-day-vwap-reclaim-v4-rvol-buckets")
 
     assert strategy.name == "trend-day-vwap-reclaim-v4-rvol-buckets"
+
+
+def test_strategy_registry_returns_dynamic_vwap_distance_reclaim() -> None:
+    strategy = get_strategy("trend-day-vwap-reclaim-v5-dynamic-vwap-distance")
+
+    assert strategy.name == "trend-day-vwap-reclaim-v5-dynamic-vwap-distance"
 
 
 def _decisions_for_bars(

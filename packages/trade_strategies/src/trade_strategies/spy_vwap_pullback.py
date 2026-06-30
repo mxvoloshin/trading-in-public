@@ -21,6 +21,11 @@ from trade_strategies.protocols import StrategyDecisionContext
 NEW_YORK = ZoneInfo("America/New_York")
 
 
+def _new_decimal_list() -> list[Decimal]:
+    """Return a typed empty list for dataclass default factories."""
+    return []
+
+
 @dataclass(slots=True)
 class _SessionState:
     """Mutable intraday facts reset at each New York trading date."""
@@ -44,6 +49,7 @@ class _SessionState:
     pullback_high: Decimal | None = None
     signal_bar_low: Decimal | None = None
     consecutive_closes_below_vwap: int = 0
+    true_ranges: list[Decimal] = field(default_factory=_new_decimal_list)
 
 
 @dataclass(slots=True)
@@ -146,6 +152,17 @@ class SpyVwapPullbackStrategy:
             )
             if state.bars_seen == 6:
                 state.first_30_minute_close = Decimal(str(bar.close))
+        previous_close = (
+            Decimal(str(state.previous_bar.close)) if state.previous_bar is not None else None
+        )
+        high = Decimal(str(bar.high))
+        low = Decimal(str(bar.low))
+        true_range = (
+            high - low
+            if previous_close is None
+            else max(high - low, abs(high - previous_close), abs(low - previous_close))
+        )
+        state.true_ranges.append(true_range)
         state.cumulative_price_volume += typical_price * volume
         state.cumulative_volume += volume
         state.previous_vwap = state.current_vwap
@@ -357,11 +374,6 @@ def _required_bar(value: Bar | None) -> Bar:
         msg = "previous_bar is required before evaluating this strategy rule"
         raise RuntimeError(msg)
     return value
-
-
-def _new_decimal_list() -> list[Decimal]:
-    """Return a typed empty list for dataclass default factories."""
-    return []
 
 
 @dataclass(slots=True)
@@ -817,3 +829,72 @@ class RvolBucketVwapReclaimStrategy(OpeningDriveQualityVwapReclaimStrategy):
             state=state,
             bar=bar,
         )
+
+
+@dataclass(slots=True)
+class DynamicVwapDistanceReclaimStrategy(RvolBucketVwapReclaimStrategy):
+    """Opening-RVOL VWAP continuation candidate with ATR-normalized distance."""
+
+    name: ClassVar[str] = "trend-day-vwap-reclaim-v5-dynamic-vwap-distance"
+
+    atr_period_5m: int = 20
+    max_vwap_distance_atr_multiple: Decimal = Decimal("1.0")
+
+    def _entry_time_trend_gate_reason(
+        self,
+        *,
+        state: _SessionState,
+        bar: Bar,
+    ) -> str | None:
+        """Replace the fixed VWAP extension cap with a 5-minute ATR cap."""
+        daily_context_reason = self._daily_context_gate_reason()
+        if daily_context_reason is not None:
+            return daily_context_reason
+        opening_drive_reason = self._opening_drive_quality_gate_reason(state)
+        if opening_drive_reason is not None:
+            return opening_drive_reason
+        opening_rvol = self._opening_relative_volume(state)
+        if opening_rvol is not None and opening_rvol < self.min_opening_relative_volume:
+            return "opening_rvol_too_low"
+
+        session_open = _required_decimal(state.session_open, "session_open")
+        first_30_minute_close = _required_decimal(
+            state.first_30_minute_close,
+            "first_30_minute_close",
+        )
+        current_vwap = _required_decimal(state.current_vwap, "current_vwap")
+        previous_vwap = _required_decimal(state.previous_vwap, "previous_vwap")
+        opening_range_high = _required_decimal(
+            state.opening_range_high,
+            "opening_range_high",
+        )
+        current_close = Decimal(str(bar.close))
+
+        first_30_minute_return = (first_30_minute_close - session_open) / session_open
+        if first_30_minute_return < self.min_first_30_minute_return:
+            return "entry_trend_filter_first_30_return_too_weak"
+        if current_vwap <= previous_vwap:
+            return "entry_trend_filter_vwap_not_rising"
+        if current_close <= current_vwap:
+            return "entry_trend_filter_close_not_above_vwap"
+        if current_close <= opening_range_high:
+            return "entry_trend_filter_close_not_above_opening_range"
+
+        atr_5m = self._current_atr_5m(state)
+        if atr_5m is None:
+            return "dynamic_vwap_distance_atr_not_ready"
+        vwap_distance = current_close - current_vwap
+        max_allowed_distance = atr_5m * self.max_vwap_distance_atr_multiple
+        if vwap_distance < 0:
+            return "dynamic_vwap_distance_below_vwap"
+        if vwap_distance > max_allowed_distance:
+            return "dynamic_vwap_distance_too_extended"
+
+        return None
+
+    def _current_atr_5m(self, state: _SessionState) -> Decimal | None:
+        """Return the current intraday 5-minute ATR if enough bars exist."""
+        if len(state.true_ranges) < self.atr_period_5m:
+            return None
+        trailing_ranges = state.true_ranges[-self.atr_period_5m :]
+        return sum(trailing_ranges, Decimal("0")) / Decimal(self.atr_period_5m)
