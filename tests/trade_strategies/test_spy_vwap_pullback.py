@@ -16,6 +16,7 @@ from trade_strategies import (
     DailyContextVwapReclaimStrategy,
     EntryFilteredTrendDayVwapReclaimStrategy,
     GapAndGoVwapPullbackStrategy,
+    OpeningDriveQualityVwapReclaimStrategy,
     SpyVwapPullbackStrategy,
     StrategyDecisionContext,
     SymmetricSpyVwapPullbackStrategy,
@@ -423,6 +424,77 @@ def test_daily_context_vwap_reclaim_rejects_falling_daily_sma() -> None:
     assert "daily_context_sma_not_rising" in decisions[-1].reason
 
 
+def test_opening_drive_quality_vwap_reclaim_enters_when_opening_close_is_strong() -> None:
+    strategy = OpeningDriveQualityVwapReclaimStrategy(
+        max_entry_distance_from_vwap=Decimal("0.03"),
+    )
+
+    _seed_completed_daily_closes(strategy, closes=[75.6 + index for index in range(25)])
+    current_day = _trend_day_reclaim_setup_bars(day=26)
+    decisions = _decisions_for_bars(strategy, current_day, position_quantity=Decimal("0"))
+
+    assert decisions[-1].action == DecisionAction.ENTER_LONG
+    assert decisions[-1].strategy_name == "trend-day-vwap-reclaim-v3-opening-drive"
+    assert "trend_day_vwap_reclaim" in decisions[-1].reason
+
+
+def test_opening_drive_quality_vwap_reclaim_keeps_daily_context_gate_first() -> None:
+    strategy = OpeningDriveQualityVwapReclaimStrategy(
+        max_entry_distance_from_vwap=Decimal("0.03"),
+    )
+
+    _seed_completed_daily_closes(strategy, closes=[75.6 + index for index in range(24)])
+    current_day = _trend_day_reclaim_setup_bars(day=26)
+    decisions = _decisions_for_bars(strategy, current_day, position_quantity=Decimal("0"))
+
+    assert decisions[-1].action == DecisionAction.HOLD
+    assert "daily_context_not_ready" in decisions[-1].reason
+
+
+def test_opening_drive_quality_vwap_reclaim_rejects_weak_opening_close_location() -> None:
+    strategy = OpeningDriveQualityVwapReclaimStrategy(
+        max_entry_distance_from_vwap=Decimal("0.03"),
+    )
+
+    _seed_completed_daily_closes(strategy, closes=[75.6 + index for index in range(25)])
+    current_day = (
+        _bar(index=0, open=100.0, high=110.0, low=100.0, close=101.0, day=26),
+        _bar(index=1, open=101.0, high=110.0, low=100.0, close=102.0, day=26),
+        _bar(index=2, open=102.0, high=110.0, low=100.0, close=103.0, day=26),
+        _bar(index=3, open=103.0, high=110.0, low=100.0, close=104.0, day=26),
+        _bar(index=4, open=104.0, high=110.0, low=100.0, close=105.0, day=26),
+        _bar(index=5, open=105.0, high=110.0, low=100.0, close=105.0, day=26),
+        _bar(index=6, open=108.0, high=108.0, low=104.0, close=106.0, day=26),
+        _bar(index=7, open=106.0, high=112.0, low=105.0, close=112.0, day=26),
+    )
+    decisions = _decisions_for_bars(strategy, current_day, position_quantity=Decimal("0"))
+
+    assert decisions[-1].action == DecisionAction.HOLD
+    assert "opening_drive_close_position_too_weak" in decisions[-1].reason
+
+
+def test_opening_drive_quality_vwap_reclaim_treats_flat_opening_range_as_neutral() -> None:
+    strategy = OpeningDriveQualityVwapReclaimStrategy(
+        max_entry_distance_from_vwap=Decimal("0.03"),
+    )
+
+    _seed_completed_daily_closes(strategy, closes=[75.6 + index for index in range(25)])
+    current_day = (
+        _bar(index=0, open=100.0, high=100.0, low=100.0, close=100.0, day=26),
+        _bar(index=1, open=100.0, high=100.0, low=100.0, close=100.0, day=26),
+        _bar(index=2, open=100.0, high=100.0, low=100.0, close=100.0, day=26),
+        _bar(index=3, open=100.0, high=100.0, low=100.0, close=100.0, day=26),
+        _bar(index=4, open=100.0, high=100.0, low=100.0, close=100.0, day=26),
+        _bar(index=5, open=100.0, high=100.0, low=100.0, close=100.0, day=26),
+        _bar(index=6, open=104.0, high=104.0, low=99.0, close=103.0, day=26),
+        _bar(index=7, open=103.5, high=105.2, low=100.0, close=105.0, day=26),
+    )
+    decisions = _decisions_for_bars(strategy, current_day, position_quantity=Decimal("0"))
+
+    assert decisions[-1].action == DecisionAction.HOLD
+    assert "opening_drive_close_position_too_weak" in decisions[-1].reason
+
+
 def test_spy_vwap_pullback_respects_max_daily_trades() -> None:
     strategy = SpyVwapPullbackStrategy(max_trades_per_day=1)
     first_setup = (
@@ -497,6 +569,12 @@ def test_strategy_registry_returns_daily_context_vwap_reclaim() -> None:
     strategy = get_strategy("trend-day-vwap-reclaim-v2-daily-context")
 
     assert strategy.name == "trend-day-vwap-reclaim-v2-daily-context"
+
+
+def test_strategy_registry_returns_opening_drive_quality_vwap_reclaim() -> None:
+    strategy = get_strategy("trend-day-vwap-reclaim-v3-opening-drive")
+
+    assert strategy.name == "trend-day-vwap-reclaim-v3-opening-drive"
 
 
 def _decisions_for_bars(
