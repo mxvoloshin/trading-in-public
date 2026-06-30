@@ -13,6 +13,7 @@ from trade_core import (
 from trade_data import Bar
 from trade_strategies import (
     EntryFilteredTrendDayVwapReclaimStrategy,
+    GapAndGoVwapPullbackStrategy,
     SpyVwapPullbackStrategy,
     StrategyDecisionContext,
     SymmetricSpyVwapPullbackStrategy,
@@ -286,6 +287,58 @@ def test_entry_filtered_trend_day_reclaim_rejects_low_opening_participation() ->
     assert "entry_trend_filter_opening_participation_too_low" in decisions[-1].reason
 
 
+def test_gap_and_go_vwap_pullback_enters_when_gap_holds_and_reclaim_sets_up() -> None:
+    strategy = GapAndGoVwapPullbackStrategy(
+        max_entry_distance_from_vwap=Decimal("0.03"),
+        max_opening_range_pct=Decimal("0.08"),
+    )
+    prior_day = (_bar(index=0, open=99.0, high=100.0, low=98.0, close=99.6),)
+    current_day = _trend_day_reclaim_setup_bars(day=29)
+
+    _decisions_for_bars(strategy, prior_day, position_quantity=Decimal("0"))
+    decisions = _decisions_for_bars(strategy, current_day, position_quantity=Decimal("0"))
+
+    assert decisions[-1].action == DecisionAction.ENTER_LONG
+    assert decisions[-1].strategy_name == "gap-and-go-vwap-pullback"
+    assert "trend_day_vwap_reclaim" in decisions[-1].reason
+
+
+def test_gap_and_go_vwap_pullback_rejects_failed_gap_by_10am() -> None:
+    strategy = GapAndGoVwapPullbackStrategy(max_entry_distance_from_vwap=Decimal("0.03"))
+    prior_day = (_bar(index=0, open=99.0, high=101.0, low=98.0, close=100.5),)
+    current_day = (
+        _bar(index=0, open=101.0, high=101.5, low=100.0, close=101.0, day=29),
+        _bar(index=1, open=101.0, high=101.5, low=100.0, close=101.0, day=29),
+        _bar(index=2, open=101.0, high=102.5, low=100.0, close=101.0, day=29),
+        _bar(index=3, open=101.0, high=103.5, low=100.0, close=101.0, day=29),
+        _bar(index=4, open=101.0, high=104.5, low=100.0, close=101.0, day=29),
+        _bar(index=5, open=101.0, high=105.5, low=100.0, close=100.5, day=29),
+        _bar(index=6, open=104.0, high=104.0, low=102.0, close=103.0, day=29),
+        _bar(index=7, open=103.5, high=105.2, low=101.0, close=105.0, day=29),
+    )
+
+    _decisions_for_bars(strategy, prior_day, position_quantity=Decimal("0"))
+    decisions = _decisions_for_bars(strategy, current_day, position_quantity=Decimal("0"))
+
+    assert decisions[-1].action == DecisionAction.HOLD
+    assert "gap_and_go_gap_failed_by_10am" in decisions[-1].reason
+
+
+def test_gap_and_go_vwap_pullback_rejects_wide_opening_range() -> None:
+    strategy = GapAndGoVwapPullbackStrategy(
+        max_entry_distance_from_vwap=Decimal("0.03"),
+        max_opening_range_pct=Decimal("0.005"),
+    )
+    prior_day = (_bar(index=0, open=99.0, high=100.0, low=98.0, close=99.6),)
+    current_day = _trend_day_reclaim_setup_bars(day=29)
+
+    _decisions_for_bars(strategy, prior_day, position_quantity=Decimal("0"))
+    decisions = _decisions_for_bars(strategy, current_day, position_quantity=Decimal("0"))
+
+    assert decisions[-1].action == DecisionAction.HOLD
+    assert "gap_and_go_opening_range_too_wide" in decisions[-1].reason
+
+
 def test_spy_vwap_pullback_respects_max_daily_trades() -> None:
     strategy = SpyVwapPullbackStrategy(max_trades_per_day=1)
     first_setup = (
@@ -348,6 +401,12 @@ def test_strategy_registry_returns_entry_filtered_trend_day_vwap_reclaim() -> No
     strategy = get_strategy("trend-day-vwap-reclaim-entry-filter")
 
     assert strategy.name == "trend-day-vwap-reclaim-entry-filter"
+
+
+def test_strategy_registry_returns_gap_and_go_vwap_pullback() -> None:
+    strategy = get_strategy("gap-and-go-vwap-pullback")
+
+    assert strategy.name == "gap-and-go-vwap-pullback"
 
 
 def _decisions_for_bars(

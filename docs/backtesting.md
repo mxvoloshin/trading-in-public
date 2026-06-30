@@ -576,6 +576,99 @@ filter, not live-ready strategy." The next research step should investigate why
 recent rolling windows and event days remain negative before adding more entries
 or loosening exits.
 
+### Gap/RVOL VWAP Pullback Candidate
+
+Issue #37 adds `gap-and-go-vwap-pullback`, a narrower positive-gap continuation
+variant:
+
+```sh
+uv run python -m trade_research_app backtest run \
+  --strategy gap-and-go-vwap-pullback \
+  --symbol SPY \
+  --timeframe 5Min \
+  --start 2025-06-28 \
+  --end 2026-06-27 \
+  --market XNYS \
+  --session regular \
+  --slippage-bps 1 \
+  --commission-per-share 0.005 \
+  --minimum-commission 0
+```
+
+The strategy starts from `trend-day-vwap-reclaim-entry-filter`, then adds a
+gap/RVOL gate before entry:
+
+- prior regular-session close must be known from the normalized bar stream
+- session open must gap up between `0.2%` and `0.6%` versus that prior close
+- the first 30-minute close must hold above the session open
+- the entry close must still be above the session open
+- the first 30-minute opening range must not exceed `1.0%` of the session open
+- the existing entry-time trend/RVOL gate still applies: close above VWAP and
+  opening-range high, rising VWAP, no more than `0.6%` extension above VWAP, and
+  opening-window volume at least `85%` of trailing average once enough history
+  exists
+
+The first broad positive-gap attempt was rejected before finalizing the default:
+`0.1%` to `1.2%` positive gaps produced `-$1.2750` gross and `-$6.99566150`
+under the mild cost model. The narrower `0.2%` to `0.6%` gap pocket was the
+only tested positive-gap slice that improved the current best candidate without
+making the first/second chronological split worse.
+
+One-year comparison, same cached SPY 5-minute regular-session data and quantity
+`1`:
+
+| Strategy | Cost model | Closed trades | Total PnL | Expectancy / trade | Profit factor | Max DD |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `spy-vwap-pullback` | 1 bp + `$0.005/share` | `278` | `-$38.26795096` | `-$0.1376544999` | `0.8039` | `-$40.94114950` |
+| `spy-vwap-pullback-long-short` | 1 bp + `$0.005/share` | `439` | `-$12.91867929` | `-$0.0294275155` | `0.9600` | `-$34.74503443` |
+| `trend-day-vwap-reclaim` | 1 bp + `$0.005/share` | `176` | `-$2.57240342` | `-$0.0146159285` | `0.9793` | `-$16.33685627` |
+| `trend-day-vwap-reclaim-entry-filter` | 1 bp + `$0.005/share` | `80` | `$3.17277618` | `$0.0396597023` | `1.0580` | `-$16.97566632` |
+| `gap-and-go-vwap-pullback` | gross | `21` | `$7.1550` | `$0.3407142857` | `1.6981` | `-$5.1000` |
+| `gap-and-go-vwap-pullback` | 1 bp + `$0.005/share` | `21` | `$4.07345250` | `$0.1939739286` | `1.3347` | `-$5.57270800` |
+
+Cost stress for `gap-and-go-vwap-pullback`:
+
+| Scenario | Total PnL | Expectancy / trade | Profit factor | Gross edge consumed |
+| --- | ---: | ---: | ---: | ---: |
+| `gross` | `$7.1550` | `$0.3407142857` | `1.6981` | `0.00x` |
+| `commission_only` | `$6.9450` | `$0.3307142857` | `1.6691` | `0.03x` |
+| `slippage_0_5bps` | `$5.71922625` | `$0.2723441071` | `1.5132` | `0.20x` |
+| `slippage_1bps` | `$4.28345250` | `$0.2039739286` | `1.3558` | `0.40x` |
+| `slippage_1bps_commission` | `$4.07345250` | `$0.1939739286` | `1.3347` | `0.43x` |
+| `slippage_2bps` | `$1.41190500` | `$0.0672335714` | `1.1008` | `0.80x` |
+| `slippage_3bps` | `-$1.45964250` | `-$0.0695067857` | `0.9091` | `1.20x` |
+
+Regime and robustness split for the mild cost model:
+
+| Bucket | Closed trades | Total PnL | Expectancy |
+| --- | ---: | ---: | ---: |
+| `trend_up` | `11` | `$10.7283460` | `$0.9753` |
+| `chop_or_mixed` | `8` | `-$4.44807450` | `-$0.5560` |
+| `trend_down` | `2` | `-$2.206819` | `-$1.1034` |
+| `normal_relative_volume` | `13` | `$9.59721700` | `$0.7382` |
+| `high_relative_volume` | `4` | `-$3.5176335` | `-$0.8794` |
+| `low_relative_volume` | `4` | `-$2.006131` | `-$0.5015` |
+| `ordinary_session` | `17` | `$5.75301150` | `$0.3384` |
+| `event_day` | `4` | `-$1.679559` | `-$0.4199` |
+
+Chronological and rolling-window split:
+
+- first half: `11` trades, `$2.43432700`, `$0.2213` expectancy
+- second half: `10` trades, `$1.6391255`, `$0.1639` expectancy
+- best rolling 6-month window: `$9.62404049`
+- worst rolling 6-month window: `-$4.813282`
+- largest trade: `$5.252330`, which is `128.94%` of total PnL
+- top 5 absolute trades: `$17.9206025`, representing `63.07%` of absolute trade
+  PnL and `274.68%` of total PnL
+
+Verdict: the gap/RVOL candidate improves the strategy on headline costed
+metrics and has a better first/second split than the previous entry-time filter.
+It is still not live-ready. The result is based on only `21` trades, the largest
+trade is bigger than the final profit, event days remain negative, and late
+rolling windows still fail. Treat this as a promising research clue: modest
+positive gaps with normal opening participation are worth further study, while
+broad positive-gap chasing and high-RVOL gap sessions are not validated.
+
 For the costed long-only baseline:
 
 - first half: `139` trades, `-$18.74215101`, `-$0.1348` expectancy

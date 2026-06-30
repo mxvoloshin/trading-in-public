@@ -35,6 +35,8 @@ class _SessionState:
     previous_vwap: Decimal | None = None
     session_open: Decimal | None = None
     first_30_minute_close: Decimal | None = None
+    first_30_minute_high: Decimal | None = None
+    first_30_minute_low: Decimal | None = None
     opening_window_volume: Decimal = Decimal("0")
     previous_bar: Bar | None = None
     trades_entered: int = 0
@@ -132,6 +134,16 @@ class SpyVwapPullbackStrategy:
             # Later strategy variants can use these values because they are
             # fully known before a 10:00-or-later entry decision.
             state.opening_window_volume += volume
+            high = Decimal(str(bar.high))
+            low = Decimal(str(bar.low))
+            state.first_30_minute_high = (
+                high
+                if state.first_30_minute_high is None
+                else max(state.first_30_minute_high, high)
+            )
+            state.first_30_minute_low = (
+                low if state.first_30_minute_low is None else min(state.first_30_minute_low, low)
+            )
             if state.bars_seen == 6:
                 state.first_30_minute_close = Decimal(str(bar.close))
         state.cumulative_price_volume += typical_price * volume
@@ -557,3 +569,73 @@ class EntryFilteredTrendDayVwapReclaimStrategy(TrendDayVwapReclaimStrategy):
         if state.first_30_minute_close is None:
             return
         self._opening_window_volumes.append(state.opening_window_volume)
+
+
+@dataclass(slots=True)
+class GapAndGoVwapPullbackStrategy(EntryFilteredTrendDayVwapReclaimStrategy):
+    """Positive-gap VWAP continuation candidate with early RVOL confirmation."""
+
+    name: ClassVar[str] = "gap-and-go-vwap-pullback"
+
+    min_gap_pct: Decimal = Decimal("0.002")
+    max_gap_pct: Decimal = Decimal("0.006")
+    max_opening_range_pct: Decimal = Decimal("0.01")
+    _previous_session_close: Decimal | None = field(default=None, init=False, repr=False)
+
+    def _state_for_bar(self, bar: Bar) -> _SessionState:
+        """Capture the prior regular-session close before the session resets."""
+        local_date = bar.timestamp_utc.astimezone(NEW_YORK).date().isoformat()
+        if self._state is not None and self._state.local_date != local_date:
+            previous_bar = self._state.previous_bar
+            if previous_bar is not None:
+                self._previous_session_close = Decimal(str(previous_bar.close))
+        return EntryFilteredTrendDayVwapReclaimStrategy._state_for_bar(self, bar)
+
+    def _entry_time_trend_gate_reason(
+        self,
+        *,
+        state: _SessionState,
+        bar: Bar,
+    ) -> str | None:
+        """Require the entry-time trend gate plus positive gap-and-hold context."""
+        session_open = _required_decimal(state.session_open, "session_open")
+        first_30_minute_close = _required_decimal(
+            state.first_30_minute_close,
+            "first_30_minute_close",
+        )
+        first_30_minute_high = _required_decimal(
+            state.first_30_minute_high,
+            "first_30_minute_high",
+        )
+        first_30_minute_low = _required_decimal(
+            state.first_30_minute_low,
+            "first_30_minute_low",
+        )
+        current_close = Decimal(str(bar.close))
+
+        if self._previous_session_close is None or self._previous_session_close == 0:
+            return "gap_and_go_prior_close_not_ready"
+
+        gap_pct = (session_open - self._previous_session_close) / self._previous_session_close
+        if gap_pct < self.min_gap_pct:
+            return "gap_and_go_positive_gap_too_small"
+        if gap_pct > self.max_gap_pct:
+            return "gap_and_go_positive_gap_too_large"
+        if first_30_minute_close < session_open:
+            return "gap_and_go_gap_failed_by_10am"
+        if current_close < session_open:
+            return "gap_and_go_close_lost_session_open"
+
+        opening_range_width = (first_30_minute_high - first_30_minute_low) / session_open
+        if opening_range_width > self.max_opening_range_pct:
+            return "gap_and_go_opening_range_too_wide"
+
+        parent_reason = EntryFilteredTrendDayVwapReclaimStrategy._entry_time_trend_gate_reason(
+            self,
+            state=state,
+            bar=bar,
+        )
+        if parent_reason is not None:
+            return parent_reason
+
+        return None
