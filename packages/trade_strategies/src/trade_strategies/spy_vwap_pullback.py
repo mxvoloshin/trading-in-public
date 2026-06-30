@@ -718,3 +718,64 @@ class DailyContextVwapReclaimStrategy(EntryFilteredTrendDayVwapReclaimStrategy):
         start_index = end_index - self.daily_sma_period
         window = closes[start_index:end_index]
         return sum(window, Decimal("0")) / Decimal(self.daily_sma_period)
+
+
+@dataclass(slots=True)
+class OpeningDriveQualityVwapReclaimStrategy(DailyContextVwapReclaimStrategy):
+    """Daily-context VWAP continuation candidate gated by opening drive quality.
+
+    This variant keeps the issue #43 completed-daily context and inherited
+    entry-time trend gates, then requires the first 30-minute close to land in
+    the upper portion of its own high-low range. That makes the early-session
+    filter stricter than "non-negative first 30-minute return" without changing
+    the actual VWAP reclaim entry trigger or exits.
+    """
+
+    name: ClassVar[str] = "trend-day-vwap-reclaim-v3-opening-drive"
+
+    min_first_30_minute_close_position: Decimal = Decimal("0.60")
+
+    def _entry_time_trend_gate_reason(
+        self,
+        *,
+        state: _SessionState,
+        bar: Bar,
+    ) -> str | None:
+        """Require opening-window close location before inherited gates."""
+        daily_context_reason = self._daily_context_gate_reason()
+        if daily_context_reason is not None:
+            return daily_context_reason
+        opening_drive_reason = self._opening_drive_quality_gate_reason(state)
+        if opening_drive_reason is not None:
+            return opening_drive_reason
+        return EntryFilteredTrendDayVwapReclaimStrategy._entry_time_trend_gate_reason(
+            self,
+            state=state,
+            bar=bar,
+        )
+
+    def _opening_drive_quality_gate_reason(self, state: _SessionState) -> str | None:
+        """Return a reject reason when the first 30-minute drive is weak."""
+        first_30_minute_close = _required_decimal(
+            state.first_30_minute_close,
+            "first_30_minute_close",
+        )
+        first_30_minute_high = _required_decimal(
+            state.first_30_minute_high,
+            "first_30_minute_high",
+        )
+        first_30_minute_low = _required_decimal(
+            state.first_30_minute_low,
+            "first_30_minute_low",
+        )
+
+        if first_30_minute_high == first_30_minute_low:
+            close_position = Decimal("0.5")
+        else:
+            close_position = (first_30_minute_close - first_30_minute_low) / (
+                first_30_minute_high - first_30_minute_low
+            )
+
+        if close_position < self.min_first_30_minute_close_position:
+            return "opening_drive_close_position_too_weak"
+        return None

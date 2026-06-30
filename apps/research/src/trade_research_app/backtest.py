@@ -73,6 +73,7 @@ class ClosedTrade:
             trade's original direction, measured from the simulated exit fill price.
         gap_bucket: Session gap bucket derived from prior regular-session close.
         opening_range_state: Session state after the first 30 minutes.
+        opening_drive_close_position_bucket: First-30-minute close location bucket.
         trend_state: Full-session VWAP/close trend proxy.
         relative_volume_bucket: Session volume versus trailing-session baseline.
         macro_event_labels: Reporting-only scheduled macro event labels for the
@@ -89,6 +90,7 @@ class ClosedTrade:
     post_exit_max_favorable_pnl: Decimal
     gap_bucket: str
     opening_range_state: str
+    opening_drive_close_position_bucket: str
     trend_state: str
     relative_volume_bucket: str
     macro_event_labels: tuple[str, ...]
@@ -251,11 +253,13 @@ class BacktestSummary:
     median_post_exit_max_favorable_pnl: Decimal
     max_post_exit_max_favorable_pnl: Decimal
     daily_breakdown: dict[str, dict[str, str | int]]
+    weekday_breakdown: dict[str, dict[str, str | int]]
     time_of_day_breakdown: dict[str, dict[str, str | int]]
     exit_reason_breakdown: dict[str, dict[str, str | int]]
     holding_time_breakdown: dict[str, dict[str, str | int]]
     gap_breakdown: dict[str, dict[str, str | int]]
     opening_range_breakdown: dict[str, dict[str, str | int]]
+    opening_drive_close_position_breakdown: dict[str, dict[str, str | int]]
     trend_breakdown: dict[str, dict[str, str | int]]
     relative_volume_breakdown: dict[str, dict[str, str | int]]
     macro_event_day_breakdown: dict[str, dict[str, str | int]]
@@ -311,11 +315,13 @@ class BacktestSummary:
             "median_post_exit_max_favorable_pnl": str(self.median_post_exit_max_favorable_pnl),
             "max_post_exit_max_favorable_pnl": str(self.max_post_exit_max_favorable_pnl),
             "daily_breakdown": self.daily_breakdown,
+            "weekday_breakdown": self.weekday_breakdown,
             "time_of_day_breakdown": self.time_of_day_breakdown,
             "exit_reason_breakdown": self.exit_reason_breakdown,
             "holding_time_breakdown": self.holding_time_breakdown,
             "gap_breakdown": self.gap_breakdown,
             "opening_range_breakdown": self.opening_range_breakdown,
+            "opening_drive_close_position_breakdown": (self.opening_drive_close_position_breakdown),
             "trend_breakdown": self.trend_breakdown,
             "relative_volume_breakdown": self.relative_volume_breakdown,
             "macro_event_day_breakdown": self.macro_event_day_breakdown,
@@ -421,6 +427,7 @@ def run_minimal_backtest(
                         post_exit_max_favorable_pnl=Decimal("0"),
                         gap_bucket="unknown_gap",
                         opening_range_state="unknown_opening_range",
+                        opening_drive_close_position_bucket="unknown_opening_drive",
                         trend_state="unknown_trend",
                         relative_volume_bucket="unknown_relative_volume",
                         macro_event_labels=(),
@@ -518,6 +525,10 @@ def run_minimal_backtest(
     )
     trade_metrics = _trade_metrics(closed_trades)
     daily_breakdown = _closed_trade_breakdown(closed_trades, timezone=session_config.timezone)
+    weekday_breakdown = _weekday_breakdown(
+        closed_trades,
+        timezone=session_config.timezone,
+    )
     time_of_day_breakdown = _time_of_day_breakdown(
         closed_trades,
         timezone=session_config.timezone,
@@ -528,6 +539,10 @@ def run_minimal_backtest(
     opening_range_breakdown = _regime_breakdown(
         closed_trades,
         tag_name="opening_range_state",
+    )
+    opening_drive_close_position_breakdown = _regime_breakdown(
+        closed_trades,
+        tag_name="opening_drive_close_position_bucket",
     )
     trend_breakdown = _regime_breakdown(closed_trades, tag_name="trend_state")
     relative_volume_breakdown = _regime_breakdown(
@@ -604,11 +619,13 @@ def run_minimal_backtest(
         median_post_exit_max_favorable_pnl=trade_metrics.median_post_exit_max_favorable_pnl,
         max_post_exit_max_favorable_pnl=trade_metrics.max_post_exit_max_favorable_pnl,
         daily_breakdown=daily_breakdown,
+        weekday_breakdown=weekday_breakdown,
         time_of_day_breakdown=time_of_day_breakdown,
         exit_reason_breakdown=exit_reason_breakdown,
         holding_time_breakdown=holding_time_breakdown,
         gap_breakdown=gap_breakdown,
         opening_range_breakdown=opening_range_breakdown,
+        opening_drive_close_position_breakdown=opening_drive_close_position_breakdown,
         trend_breakdown=trend_breakdown,
         relative_volume_breakdown=relative_volume_breakdown,
         macro_event_day_breakdown=macro_event_day_breakdown,
@@ -936,6 +953,7 @@ class SessionRegimeTags:
 
     gap_bucket: str
     opening_range_state: str
+    opening_drive_close_position_bucket: str
     trend_state: str
     relative_volume_bucket: str
 
@@ -961,6 +979,7 @@ def _with_regime_tags(
             SessionRegimeTags(
                 gap_bucket="unknown_gap",
                 opening_range_state="unknown_opening_range",
+                opening_drive_close_position_bucket="unknown_opening_drive",
                 trend_state="unknown_trend",
                 relative_volume_bucket="unknown_relative_volume",
             ),
@@ -970,6 +989,7 @@ def _with_regime_tags(
                 trade,
                 gap_bucket=tags.gap_bucket,
                 opening_range_state=tags.opening_range_state,
+                opening_drive_close_position_bucket=tags.opening_drive_close_position_bucket,
                 trend_state=tags.trend_state,
                 relative_volume_bucket=tags.relative_volume_bucket,
             )
@@ -1023,6 +1043,10 @@ def session_regime_tags(
                 previous_close=previous_close,
             ),
             opening_range_state=_opening_range_state(
+                bars_for_date,
+                zone=zone,
+            ),
+            opening_drive_close_position_bucket=_opening_drive_close_position_bucket(
                 bars_for_date,
                 zone=zone,
             ),
@@ -1106,6 +1130,38 @@ def _opening_range_state(
     if reference_close < opening_low:
         return "below_opening_range"
     return "inside_opening_range"
+
+
+def _opening_drive_close_position_bucket(
+    bars: Sequence[Bar],
+    *,
+    zone: ZoneInfo,
+) -> str:
+    """Bucket the first 30-minute close location within its high-low range."""
+    opening_bars = [
+        bar
+        for bar in bars
+        if bar.timestamp_utc.astimezone(zone).time().hour == 9
+        and bar.timestamp_utc.astimezone(zone).time().minute < 60
+    ][:6]
+    if len(opening_bars) < 6:
+        return "unknown_opening_drive"
+
+    opening_high = max(Decimal(str(bar.high)) for bar in opening_bars)
+    opening_low = min(Decimal(str(bar.low)) for bar in opening_bars)
+    opening_close = Decimal(str(opening_bars[-1].close))
+    if opening_high == opening_low:
+        close_position = Decimal("0.5")
+    else:
+        close_position = (opening_close - opening_low) / (opening_high - opening_low)
+
+    if close_position < Decimal("0.40"):
+        return "0.00-0.40"
+    if close_position < Decimal("0.60"):
+        return "0.40-0.60"
+    if close_position < Decimal("0.80"):
+        return "0.60-0.80"
+    return "0.80-1.00"
 
 
 def _trend_state(
@@ -1349,6 +1405,20 @@ def _time_of_day_breakdown(
         bucket_end = bucket_start + timedelta(minutes=30)
         label = f"{bucket_start:%H:%M}-{bucket_end:%H:%M}"
         buckets.setdefault(label, []).append(trade)
+    return {bucket: _trade_bucket_summary(trades) for bucket, trades in sorted(buckets.items())}
+
+
+def _weekday_breakdown(
+    closed_trades: list[ClosedTrade],
+    *,
+    timezone: str,
+) -> dict[str, dict[str, str | int]]:
+    """Group completed trades by market-local exit weekday."""
+    zone = ZoneInfo(timezone)
+    buckets: dict[str, list[ClosedTrade]] = {}
+    for trade in closed_trades:
+        local_exit = trade.exited_at_utc.astimezone(zone)
+        buckets.setdefault(f"{local_exit.weekday()}_{local_exit:%A}", []).append(trade)
     return {bucket: _trade_bucket_summary(trades) for bucket, trades in sorted(buckets.items())}
 
 

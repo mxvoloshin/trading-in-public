@@ -143,6 +143,7 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
         },
         "macro_event_type_breakdown": {"ordinary_session": expected_trade_bucket},
         "opening_range_breakdown": {"unknown_opening_range": expected_trade_bucket},
+        "opening_drive_close_position_breakdown": {"unknown_opening_drive": expected_trade_bucket},
         "pending_orders": 0,
         "profit_factor": "0",
         "realized_pnl": "-1.0",
@@ -165,6 +166,7 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
         "time_of_day_breakdown": {"09:30-10:00": expected_trade_bucket},
         "trend_breakdown": {"chop_or_mixed": expected_trade_bucket},
         "unrealized_pnl": "0",
+        "weekday_breakdown": {"4_Friday": expected_trade_bucket},
         "win_rate": "0",
         "winning_trades": 0,
         "worst_trade_pnl": "-1.0",
@@ -423,11 +425,15 @@ def test_minimal_backtest_reports_trade_breakdowns(tmp_path: Path) -> None:
         "winning_trades": 0,
     }
     assert summary.daily_breakdown == {"2026-06-26": expected_trade_bucket}
+    assert summary.weekday_breakdown == {"4_Friday": expected_trade_bucket}
     assert summary.time_of_day_breakdown == {"09:30-10:00": expected_trade_bucket}
     assert summary.exit_reason_breakdown == {"close_below_previous_close": expected_trade_bucket}
     assert summary.holding_time_breakdown == {"00-30m": expected_trade_bucket}
     assert summary.gap_breakdown == {"unknown_gap": expected_trade_bucket}
     assert summary.opening_range_breakdown == {"unknown_opening_range": expected_trade_bucket}
+    assert summary.opening_drive_close_position_breakdown == {
+        "unknown_opening_drive": expected_trade_bucket
+    }
     assert summary.trend_breakdown == {"chop_or_mixed": expected_trade_bucket}
     assert summary.relative_volume_breakdown == {"unknown_relative_volume": expected_trade_bucket}
 
@@ -512,6 +518,7 @@ def test_session_regime_tags_bucket_gap_opening_range_trend_and_volume() -> None
     assert tags["2026-06-26"].gap_bucket == "unknown_gap"
     assert tags["2026-06-29"].gap_bucket == "large_gap_up"
     assert tags["2026-06-29"].opening_range_state == "above_opening_range"
+    assert tags["2026-06-29"].opening_drive_close_position_bucket == "0.40-0.60"
     assert tags["2026-06-29"].trend_state == "trend_up"
     assert tags["2026-06-29"].relative_volume_bucket == "high_relative_volume"
 
