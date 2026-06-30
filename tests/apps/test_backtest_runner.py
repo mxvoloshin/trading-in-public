@@ -501,10 +501,20 @@ def test_minimal_backtest_tags_macro_event_sessions(tmp_path: Path) -> None:
 def test_session_regime_tags_bucket_gap_opening_range_trend_and_volume() -> None:
     bars = (
         *[
-            _bar_at(day=26, hour=13, minute=30 + offset, open=100.0, close=100.0, volume=100)
-            for offset in range(0, 30, 5)
+            opening_bar
+            for day in range(1, 21)
+            for opening_bar in [
+                _bar_at(
+                    day=day,
+                    hour=13,
+                    minute=30 + offset,
+                    open=100.0,
+                    close=100.0,
+                    volume=100,
+                )
+                for offset in range(0, 30, 5)
+            ]
         ],
-        _bar_at(day=26, hour=14, minute=0, open=100.0, close=100.0, volume=100),
         *[
             _bar_at(day=29, hour=13, minute=30 + offset, open=101.0, close=101.0, volume=500)
             for offset in range(0, 30, 5)
@@ -515,12 +525,13 @@ def test_session_regime_tags_bucket_gap_opening_range_trend_and_volume() -> None
 
     tags = session_regime_tags(bars, timezone="America/New_York")
 
-    assert tags["2026-06-26"].gap_bucket == "unknown_gap"
+    assert tags["2026-06-01"].gap_bucket == "unknown_gap"
+    assert tags["2026-06-01"].relative_volume_bucket == "insufficient_rvol_history"
     assert tags["2026-06-29"].gap_bucket == "large_gap_up"
     assert tags["2026-06-29"].opening_range_state == "above_opening_range"
     assert tags["2026-06-29"].opening_drive_close_position_bucket == "0.40-0.60"
     assert tags["2026-06-29"].trend_state == "trend_up"
-    assert tags["2026-06-29"].relative_volume_bucket == "high_relative_volume"
+    assert tags["2026-06-29"].relative_volume_bucket == "event_like"
 
 
 def _request() -> HistoricalBarsRequest:
