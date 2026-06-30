@@ -495,6 +495,87 @@ or tuning a large parameter grid.
 The robustness diagnostics keep both variants below the bar for live or
 paper/live validation.
 
+### Entry-Filtered Trend-Day VWAP Reclaim Candidate
+
+Issue #36 adds a tradable trend/chop gate as
+`trend-day-vwap-reclaim-entry-filter`:
+
+```sh
+uv run python -m trade_research_app backtest run \
+  --strategy trend-day-vwap-reclaim-entry-filter \
+  --symbol SPY \
+  --timeframe 5Min \
+  --start 2025-06-28 \
+  --end 2026-06-27 \
+  --market XNYS \
+  --session regular \
+  --slippage-bps 1 \
+  --commission-per-share 0.005 \
+  --minimum-commission 0
+```
+
+The filter is applied inside the strategy before entry. It deliberately avoids
+the full-session `trend_up` diagnostic because that label needs the final
+session close and full-session VWAP. Instead, it uses only information known at
+or before the simulated decision time:
+
+- first 30-minute return from the session open must be non-negative
+- current close must be above VWAP and above the opening-range high
+- VWAP must be rising versus the previous completed bar
+- entry close must not be more than `0.6%` above VWAP
+- after 20 prior sessions exist, 9:30-10:00 volume must be at least `85%` of the
+  trailing 20-session opening-window average
+
+One-year comparison, same cached SPY 5-minute regular-session data and quantity
+`1`:
+
+| Strategy | Cost model | Closed trades | Total PnL | Expectancy / trade | Profit factor | Max DD |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `spy-vwap-pullback` | 1 bp + `$0.005/share` | `278` | `-$38.26795096` | `-$0.1376544999` | `0.8039` | `-$40.94114950` |
+| `trend-day-vwap-reclaim` | 1 bp + `$0.005/share` | `176` | `-$2.57240342` | `-$0.0146159285` | `0.9793` | `-$16.33685627` |
+| `trend-day-vwap-reclaim-entry-filter` | gross | `80` | `$14.8880` | `$0.1861` | `1.3190` | `-$13.1370` |
+| `trend-day-vwap-reclaim-entry-filter` | 1 bp + `$0.005/share` | `80` | `$3.17277618` | `$0.0396597023` | `1.0580` | `-$16.97566632` |
+
+Cost stress for `trend-day-vwap-reclaim-entry-filter`:
+
+| Scenario | Total PnL | Expectancy / trade | Profit factor | Gross edge consumed |
+| --- | ---: | ---: | ---: | ---: |
+| `gross` | `$14.8880` | `$0.1861` | `1.3190` | `0.00x` |
+| `commission_only` | `$14.0880` | `$0.1761` | `1.2983` | `0.05x` |
+| `slippage_0_5bps` | `$9.43038809` | `$0.1178798511` | `1.1870` | `0.37x` |
+| `slippage_1bps` | `$3.97277618` | `$0.0496597023` | `1.0733` | `0.73x` |
+| `slippage_1bps_commission` | `$3.17277618` | `$0.0396597023` | `1.0580` | `0.79x` |
+| `slippage_2bps` | `-$6.94244764` | `-$0.0867805955` | `0.8878` | `1.47x` |
+
+The filter improves the current research candidate under the mild cost model:
+it changes the narrowed trend-day reclaim from `-$2.57240342` to
+`$3.17277618`, cuts closed trades from `176` to `80`, and improves expectancy
+from `-$0.0146` to `$0.0397` per completed trade. It also materially reduces
+exposure to the known damage buckets:
+
+| Full-session diagnostic tag | Closed trades | Total PnL | Expectancy |
+| --- | ---: | ---: | ---: |
+| `trend_up` | `43` | `$36.79730918` | `$0.8558` |
+| `chop_or_mixed` | `24` | `-$17.04855300` | `-$0.7104` |
+| `trend_down` | `13` | `-$16.575980` | `-$1.2751` |
+
+The robustness result is still not strong enough for live or paper/live
+validation:
+
+- first half: `40` trades, `$4.23663150`, `$0.1059` expectancy
+- second half: `40` trades, `-$1.06385532`, `-$0.0266` expectancy
+- best rolling 6-month window: `$18.26958699`
+- worst rolling 6-month window: `-$15.04272632`
+- event days: `11` trades, `-$3.434154`
+- ordinary sessions: `69` trades, `$6.60693018`
+
+Verdict: the issue #36 filter improves the strategy versus the prior candidates
+and clears the basic net-expectancy kill criterion under the mild cost model,
+but it does not clear the robustness bar. The research result is "promising
+filter, not live-ready strategy." The next research step should investigate why
+recent rolling windows and event days remain negative before adding more entries
+or loosening exits.
+
 For the costed long-only baseline:
 
 - first half: `139` trades, `-$18.74215101`, `-$0.1348` expectancy

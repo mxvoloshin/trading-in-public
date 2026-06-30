@@ -12,6 +12,7 @@ from trade_core import (
 )
 from trade_data import Bar
 from trade_strategies import (
+    EntryFilteredTrendDayVwapReclaimStrategy,
     SpyVwapPullbackStrategy,
     StrategyDecisionContext,
     SymmetricSpyVwapPullbackStrategy,
@@ -222,6 +223,69 @@ def test_trend_day_vwap_reclaim_allows_only_one_trade_per_day() -> None:
     assert "entry_context_not_ready" in decision.reason
 
 
+def test_entry_filtered_trend_day_reclaim_enters_when_entry_time_trend_gate_passes() -> None:
+    strategy = EntryFilteredTrendDayVwapReclaimStrategy(
+        max_entry_distance_from_vwap=Decimal("0.03")
+    )
+    bars = _trend_day_reclaim_setup_bars()
+
+    decisions = _decisions_for_bars(strategy, bars, position_quantity=Decimal("0"))
+
+    assert decisions[-1].action == DecisionAction.ENTER_LONG
+    assert decisions[-1].strategy_name == "trend-day-vwap-reclaim-entry-filter"
+    assert "trend_day_vwap_reclaim" in decisions[-1].reason
+
+
+def test_entry_filtered_trend_day_reclaim_rejects_weak_opening_window() -> None:
+    strategy = EntryFilteredTrendDayVwapReclaimStrategy(min_first_30_minute_return=Decimal("0.001"))
+    bars = (
+        _bar(index=0, open=100.0, high=101.0, low=99.0, close=100.0),
+        _bar(index=1, open=100.0, high=101.5, low=100.0, close=100.0),
+        _bar(index=2, open=100.0, high=102.5, low=100.0, close=100.0),
+        _bar(index=3, open=100.0, high=103.5, low=100.0, close=100.0),
+        _bar(index=4, open=100.0, high=104.5, low=100.0, close=100.0),
+        _bar(index=5, open=100.0, high=105.5, low=100.0, close=100.0),
+        _bar(index=6, open=104.0, high=104.0, low=102.0, close=103.0),
+        _bar(index=7, open=103.5, high=105.2, low=101.0, close=105.0),
+    )
+
+    decisions = _decisions_for_bars(strategy, bars, position_quantity=Decimal("0"))
+
+    assert decisions[-1].action == DecisionAction.HOLD
+    assert "entry_trend_filter_first_30_return_too_weak" in decisions[-1].reason
+
+
+def test_entry_filtered_trend_day_reclaim_rejects_extended_entries() -> None:
+    strategy = EntryFilteredTrendDayVwapReclaimStrategy(
+        max_entry_distance_from_vwap=Decimal("0.001")
+    )
+    bars = _trend_day_reclaim_setup_bars()
+
+    decisions = _decisions_for_bars(strategy, bars, position_quantity=Decimal("0"))
+
+    assert decisions[-1].action == DecisionAction.HOLD
+    assert "entry_trend_filter_entry_too_extended" in decisions[-1].reason
+
+
+def test_entry_filtered_trend_day_reclaim_rejects_low_opening_participation() -> None:
+    strategy = EntryFilteredTrendDayVwapReclaimStrategy(
+        max_entry_distance_from_vwap=Decimal("0.03"),
+        min_opening_relative_volume=Decimal("1.5"),
+        relative_volume_lookback_sessions=1,
+    )
+    prior_day = tuple(
+        _bar(index=index, open=100.0, high=101.0, low=99.0, close=100.0, volume=2_000)
+        for index in range(6)
+    )
+    current_day = _trend_day_reclaim_setup_bars(day=29, volume=1_000)
+
+    _decisions_for_bars(strategy, prior_day, position_quantity=Decimal("0"))
+    decisions = _decisions_for_bars(strategy, current_day, position_quantity=Decimal("0"))
+
+    assert decisions[-1].action == DecisionAction.HOLD
+    assert "entry_trend_filter_opening_participation_too_low" in decisions[-1].reason
+
+
 def test_spy_vwap_pullback_respects_max_daily_trades() -> None:
     strategy = SpyVwapPullbackStrategy(max_trades_per_day=1)
     first_setup = (
@@ -280,6 +344,12 @@ def test_strategy_registry_returns_trend_day_vwap_reclaim() -> None:
     assert strategy.name == "trend-day-vwap-reclaim"
 
 
+def test_strategy_registry_returns_entry_filtered_trend_day_vwap_reclaim() -> None:
+    strategy = get_strategy("trend-day-vwap-reclaim-entry-filter")
+
+    assert strategy.name == "trend-day-vwap-reclaim-entry-filter"
+
+
 def _decisions_for_bars(
     strategy: SpyVwapPullbackStrategy | SymmetricSpyVwapPullbackStrategy,
     bars: tuple[Bar, ...],
@@ -303,16 +373,16 @@ def _decisions_for_bars(
     return decisions
 
 
-def _trend_day_reclaim_setup_bars() -> tuple[Bar, ...]:
+def _trend_day_reclaim_setup_bars(*, day: int = 26, volume: int = 1_000) -> tuple[Bar, ...]:
     return (
-        _bar(index=0, open=100.0, high=101.0, low=99.0, close=100.0),
-        _bar(index=1, open=100.0, high=101.5, low=100.0, close=101.0),
-        _bar(index=2, open=101.0, high=102.5, low=101.0, close=102.0),
-        _bar(index=3, open=102.0, high=103.5, low=102.0, close=103.0),
-        _bar(index=4, open=103.0, high=104.5, low=103.0, close=104.0),
-        _bar(index=5, open=104.0, high=105.5, low=104.0, close=105.0),
-        _bar(index=6, open=104.0, high=104.0, low=102.0, close=103.0),
-        _bar(index=7, open=103.5, high=105.2, low=101.0, close=105.0),
+        _bar(index=0, open=100.0, high=101.0, low=99.0, close=100.0, day=day, volume=volume),
+        _bar(index=1, open=100.0, high=101.5, low=100.0, close=101.0, day=day, volume=volume),
+        _bar(index=2, open=101.0, high=102.5, low=101.0, close=102.0, day=day, volume=volume),
+        _bar(index=3, open=102.0, high=103.5, low=102.0, close=103.0, day=day, volume=volume),
+        _bar(index=4, open=103.0, high=104.5, low=103.0, close=104.0, day=day, volume=volume),
+        _bar(index=5, open=104.0, high=105.5, low=104.0, close=105.0, day=day, volume=volume),
+        _bar(index=6, open=104.0, high=104.0, low=102.0, close=103.0, day=day, volume=volume),
+        _bar(index=7, open=103.5, high=105.2, low=101.0, close=105.0, day=day, volume=volume),
     )
 
 
@@ -345,15 +415,17 @@ def _bar(
     high: float,
     low: float,
     close: float,
+    day: int = 26,
+    volume: int = 1_000,
 ) -> Bar:
     return Bar(
         instrument_id="SPY.US",
         timeframe="5Min",
-        timestamp_utc=datetime(2026, 6, 26, 13, 30, tzinfo=UTC) + timedelta(minutes=index * 5),
+        timestamp_utc=datetime(2026, 6, day, 13, 30, tzinfo=UTC) + timedelta(minutes=index * 5),
         open=open,
         high=high,
         low=low,
         close=close,
-        volume=1_000,
+        volume=volume,
         session="regular",
     )

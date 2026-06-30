@@ -33,6 +33,9 @@ class _SessionState:
     cumulative_volume: Decimal = Decimal("0")
     current_vwap: Decimal | None = None
     previous_vwap: Decimal | None = None
+    session_open: Decimal | None = None
+    first_30_minute_close: Decimal | None = None
+    opening_window_volume: Decimal = Decimal("0")
     previous_bar: Bar | None = None
     trades_entered: int = 0
     pullback_low: Decimal | None = None
@@ -122,6 +125,15 @@ class SpyVwapPullbackStrategy:
         ) / Decimal("3")
         volume = Decimal(bar.volume)
         state.bars_seen += 1
+        if state.bars_seen == 1:
+            state.session_open = Decimal(str(bar.open))
+        if state.bars_seen <= 6:
+            # Six 5-minute bars cover the 9:30-10:00 New York opening window.
+            # Later strategy variants can use these values because they are
+            # fully known before a 10:00-or-later entry decision.
+            state.opening_window_volume += volume
+            if state.bars_seen == 6:
+                state.first_30_minute_close = Decimal(str(bar.close))
         state.cumulative_price_volume += typical_price * volume
         state.cumulative_volume += volume
         state.previous_vwap = state.current_vwap
@@ -335,6 +347,11 @@ def _required_bar(value: Bar | None) -> Bar:
     return value
 
 
+def _new_decimal_list() -> list[Decimal]:
+    """Return a typed empty list for dataclass default factories."""
+    return []
+
+
 @dataclass(slots=True)
 class SymmetricSpyVwapPullbackStrategy(SpyVwapPullbackStrategy):
     """Long and short SPY VWAP pullback candidate for trend-continuation research."""
@@ -427,3 +444,116 @@ class TrendDayVwapReclaimStrategy(SpyVwapPullbackStrategy):
         if local_time < self.no_new_entries_before:
             return False
         return SpyVwapPullbackStrategy._has_entry_context(self, state=state, bar=bar)
+
+
+@dataclass(slots=True)
+class EntryFilteredTrendDayVwapReclaimStrategy(TrendDayVwapReclaimStrategy):
+    """Trend-day reclaim variant gated by entry-time trend/chop evidence.
+
+    The full-session `trend_up` diagnostic has looked promising, but it is not
+    tradable because the final session close and VWAP are unknown at entry time.
+    This variant approximates that bucket with only facts already observed by
+    the strategy: opening-window return, price/VWAP location, VWAP slope,
+    distance from VWAP, and early participation versus prior opening windows.
+    """
+
+    name: ClassVar[str] = "trend-day-vwap-reclaim-entry-filter"
+
+    min_first_30_minute_return: Decimal = Decimal("0")
+    max_entry_distance_from_vwap: Decimal = Decimal("0.006")
+    min_opening_relative_volume: Decimal = Decimal("0.85")
+    relative_volume_lookback_sessions: int = 20
+    _opening_window_volumes: list[Decimal] = field(
+        default_factory=_new_decimal_list,
+        init=False,
+        repr=False,
+    )
+
+    def _state_for_bar(self, bar: Bar) -> _SessionState:
+        """Reset session state while preserving prior opening-window volumes."""
+        local_date = bar.timestamp_utc.astimezone(NEW_YORK).date().isoformat()
+        if self._state is not None and self._state.local_date != local_date:
+            self._record_completed_opening_window_volume(self._state)
+        return TrendDayVwapReclaimStrategy._state_for_bar(self, bar)
+
+    def _long_entry_decision(
+        self,
+        *,
+        state: _SessionState,
+        bar: Bar,
+    ) -> tuple[DecisionAction, str]:
+        """Apply a tradable trend/chop gate before the reclaim setup."""
+        gate_reason = self._entry_time_trend_gate_reason(state=state, bar=bar)
+        if gate_reason is not None:
+            return DecisionAction.HOLD, gate_reason
+        return TrendDayVwapReclaimStrategy._long_entry_decision(self, state=state, bar=bar)
+
+    def _flat_position_decision(
+        self,
+        *,
+        state: _SessionState,
+        bar: Bar,
+    ) -> tuple[DecisionAction, str]:
+        """Return the specific entry-time gate reason for filtered holds."""
+        if not self._has_entry_context(state=state, bar=bar):
+            return DecisionAction.HOLD, "entry_context_not_ready"
+        return self._long_entry_decision(state=state, bar=bar)
+
+    def _entry_time_trend_gate_reason(
+        self,
+        *,
+        state: _SessionState,
+        bar: Bar,
+    ) -> str | None:
+        """Return a reject reason when entry-time trend evidence is too weak."""
+        session_open = _required_decimal(state.session_open, "session_open")
+        first_30_minute_close = _required_decimal(
+            state.first_30_minute_close,
+            "first_30_minute_close",
+        )
+        current_vwap = _required_decimal(state.current_vwap, "current_vwap")
+        previous_vwap = _required_decimal(state.previous_vwap, "previous_vwap")
+        opening_range_high = _required_decimal(
+            state.opening_range_high,
+            "opening_range_high",
+        )
+        current_close = Decimal(str(bar.close))
+
+        first_30_minute_return = (first_30_minute_close - session_open) / session_open
+        if first_30_minute_return < self.min_first_30_minute_return:
+            return "entry_trend_filter_first_30_return_too_weak"
+        if current_vwap <= previous_vwap:
+            return "entry_trend_filter_vwap_not_rising"
+        if current_close <= current_vwap:
+            return "entry_trend_filter_close_not_above_vwap"
+        if current_close <= opening_range_high:
+            return "entry_trend_filter_close_not_above_opening_range"
+
+        distance_from_vwap = (current_close - current_vwap) / current_vwap
+        if distance_from_vwap > self.max_entry_distance_from_vwap:
+            return "entry_trend_filter_entry_too_extended"
+
+        relative_opening_volume = self._opening_relative_volume(state)
+        if (
+            relative_opening_volume is not None
+            and relative_opening_volume < self.min_opening_relative_volume
+        ):
+            return "entry_trend_filter_opening_participation_too_low"
+
+        return None
+
+    def _opening_relative_volume(self, state: _SessionState) -> Decimal | None:
+        """Compare today's completed opening-window volume with prior sessions."""
+        if len(self._opening_window_volumes) < self.relative_volume_lookback_sessions:
+            return None
+        trailing_window = self._opening_window_volumes[-self.relative_volume_lookback_sessions :]
+        baseline = sum(trailing_window, Decimal("0")) / Decimal(len(trailing_window))
+        if baseline == 0:
+            return None
+        return state.opening_window_volume / baseline
+
+    def _record_completed_opening_window_volume(self, state: _SessionState) -> None:
+        """Store one completed 9:30-10:00 volume sample for future sessions."""
+        if state.first_30_minute_close is None:
+            return
+        self._opening_window_volumes.append(state.opening_window_volume)
