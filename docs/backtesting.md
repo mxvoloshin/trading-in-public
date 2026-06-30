@@ -130,10 +130,12 @@ The JSON summary also includes research diagnostics for completed trades:
 - total slippage cost, total commission, and total execution cost
 - average, median, and longest completed-trade holding time
 - daily completed-trade breakdowns
+- weekday completed-trade breakdowns
 - 30-minute market-local time-of-day breakdowns
 - exit-reason breakdowns
 - holding-time PnL buckets
 - gap, opening-range, trend/chop, and relative-volume regime breakdowns
+- first-30-minute opening-drive close-position buckets
 - max consecutive losing trades
 - top trade/day contribution concentration
 - first-half versus second-half chronological split summaries
@@ -147,6 +149,8 @@ The first regime tags are reporting-only diagnostics:
 - `gap_breakdown` compares the session open to the prior regular-session close.
 - `opening_range_breakdown` classifies the 10:00 New York close versus the
   first 30-minute opening range.
+- `opening_drive_close_position_breakdown` buckets where the first 30-minute
+  close lands inside that opening window's high-low range.
 - `trend_breakdown` uses full-session VWAP direction and close location to
   split `trend_up`, `trend_down`, and `chop_or_mixed` sessions.
 - `relative_volume_breakdown` compares session volume to the trailing 20-session
@@ -782,6 +786,114 @@ costed PnL still trails `gap-and-go-vwap-pullback` (`$2.88858998` versus
 profit remains concentrated in a small number of trades. The daily trend idea is
 useful as a reporting dimension or a broader future filter, but this version does
 not improve the current candidate.
+
+Issue #44 adds `trend-day-vwap-reclaim-v3-opening-drive`, an opening-drive
+quality filter on top of `trend-day-vwap-reclaim-v2-daily-context`:
+
+```sh
+uv run python -m trade_research_app backtest run \
+  --strategy trend-day-vwap-reclaim-v3-opening-drive \
+  --symbol SPY \
+  --timeframe 5Min \
+  --start 2025-06-28 \
+  --end 2026-06-27 \
+  --market XNYS \
+  --session regular \
+  --slippage-bps 1 \
+  --commission-per-share 0.005 \
+  --minimum-commission 0
+```
+
+The strategy keeps the completed-daily context, entry-time trend/RVOL gate, and
+VWAP reclaim entry/exit rules unchanged. It adds one rule before long entries:
+
+```text
+first_30m_close_position =
+  (first_30m_close - first_30m_low) / (first_30m_high - first_30m_low)
+
+opening_drive_quality =
+  first_30m_return >= 0
+  and first_30m_close_position >= 0.60
+```
+
+If the first 30-minute high equals the first 30-minute low, the close position is
+treated as neutral `0.5`, which fails the default `0.60` threshold.
+
+One-year comparison, same cached SPY 5-minute regular-session data, quantity
+`1`, and legacy no-minimum decision cost model:
+
+| Strategy | Cost model | Closed trades | Total PnL | Expectancy / trade | Profit factor | Max DD |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `gap-and-go-vwap-pullback` | 1 bp + `$0.005/share` | `21` | `$4.07345250` | `$0.1939739286` | `1.3347` | `-$5.57270800` |
+| `trend-day-vwap-reclaim-v2-daily-context` | gross | `37` | `$8.3898` | `$0.2267513514` | `1.4231` | `-$6.4350` |
+| `trend-day-vwap-reclaim-v2-daily-context` | 1 bp + `$0.005/share` | `37` | `$2.88858998` | `$0.0780699995` | `1.1234` | `-$7.94506601` |
+| `trend-day-vwap-reclaim-v3-opening-drive` | gross | `30` | `$9.1948` | `$0.3064933333` | `1.6596` | `-$4.7901` |
+| `trend-day-vwap-reclaim-v3-opening-drive` | 1 bp + `$0.005/share` | `30` | `$4.74405148` | `$0.1581350493` | `1.2830` | `-$5.41768901` |
+
+Cost stress for `trend-day-vwap-reclaim-v3-opening-drive`:
+
+| Scenario | Total PnL | Expectancy / trade | Profit factor | Gross edge consumed |
+| --- | ---: | ---: | ---: | ---: |
+| `gross` | `$9.1948` | `$0.3064933333` | `1.6596` | `0.00x` |
+| `commission_only` | `$8.8948` | `$0.2964933333` | `1.6295` | `0.03x` |
+| `slippage_0_5bps` | `$7.119425740` | `$0.2373141913` | `1.4667` | `0.23x` |
+| `slippage_1bps` | `$5.04405148` | `$0.1681350493` | `1.3044` | `0.45x` |
+| `slippage_1bps_commission` | `$4.74405148` | `$0.1581350493` | `1.2830` | `0.48x` |
+| `slippage_2bps` | `$0.89330296` | `$0.0297767653` | `1.0462` | `0.90x` |
+| `slippage_3bps` | `-$3.25744556` | `-$0.1085815187` | `0.8525` | `1.35x` |
+| `ibkr_ca_fixed_1bps` | `-$54.95594852` | `-$1.8318649507` | `0.0931` | `6.98x` |
+| `ibkr_ca_tiered_1bps` | `-$15.95594852` | `-$0.5318649507` | `0.4784` | `2.74x` |
+
+Opening-drive close-position buckets on the issue #43 daily-context strategy,
+using the legacy no-minimum cost model:
+
+| First 30m close-position bucket | Closed trades | Total PnL | Expectancy / trade |
+| --- | ---: | ---: | ---: |
+| `0.00-0.40` | `3` | `$4.0147975` | `$1.3382658333` |
+| `0.40-0.60` | `4` | `-$5.870259` | `-$1.46756475` |
+| `0.60-0.80` | `9` | `$4.9602295` | `$0.5511366111` |
+| `0.80-1.00` | `21` | `-$0.21617802` | `-$0.0102941914` |
+
+Robustness split for `trend-day-vwap-reclaim-v3-opening-drive` under the legacy
+no-minimum cost model:
+
+- first half: `15` trades, `-$0.80848201`, `-$0.0539` expectancy
+- second half: `15` trades, `$5.55253349`, `$0.3702` expectancy
+- best rolling 6-month window: `$5.80545949`
+- worst rolling 6-month window: `$0.09958549`
+- event days: `4` trades, `$0.457112`, `$0.1143` expectancy
+- ordinary sessions: `26` trades, `$4.28693948`, `$0.1649` expectancy
+- weekday split: Monday `10` trades, `$1.98143349`; Tuesday `3` trades,
+  `-$2.401405`; Wednesday `3` trades, `$6.2370835`; Thursday `6` trades,
+  `$4.0664065`; Friday `8` trades, `-$5.13946701`
+- largest trade: `$4.278880`, which is `90.19%` of total PnL
+- top 5 absolute trades: `$16.6593915`, representing `43.53%` of absolute trade
+  PnL and `219.72%` of total PnL
+
+Regime and opening-drive splits for `trend-day-vwap-reclaim-v3-opening-drive`:
+
+| Bucket | Closed trades | Total PnL | Expectancy / trade |
+| --- | ---: | ---: | ---: |
+| `0.60-0.80` close position | `9` | `$4.9602295` | `$0.5511` |
+| `0.80-1.00` close position | `21` | `-$0.21617802` | `-$0.0103` |
+| `trend_up` | `17` | `$12.76896949` | `$0.7511` |
+| `chop_or_mixed` | `11` | `-$6.40865301` | `-$0.5826` |
+| `trend_down` | `2` | `-$1.616265` | `-$0.8081` |
+| `normal_relative_volume` | `23` | `$7.53172848` | `$0.3275` |
+| `low_relative_volume` | `6` | `-$2.4801455` | `-$0.4134` |
+| `high_relative_volume` | `1` | `-$0.3075315` | `-$0.3075` |
+
+Verdict: promising research clue, still not a live candidate. The opening-drive
+filter improves the legacy no-minimum result versus both the issue #43
+daily-context variant and the `gap-and-go-vwap-pullback` benchmark, with fewer
+trades, better drawdown, positive event-day PnL, and no negative rolling
+6-month window. However, the bucket evidence is not monotonic: the `0.60-0.80`
+bucket is strong, while the "very strong" `0.80-1.00` bucket is near flat. The
+first half is also negative, profit is still concentrated in a few trades, and
+IBKR Canada small-account minimum commission approximations remain materially
+negative. Treat the opening-drive close-position bucket as a useful diagnostic
+and a candidate filter to carry into the next tests, not proof of a tradable
+edge.
 
 ### Small Account Sizing Example
 
