@@ -137,6 +137,11 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
         "median_post_exit_max_favorable_pnl": "0.0",
         "median_trade_pnl": "-1.0",
         "minimum_commission": "0",
+        "macro_event_day_breakdown": {
+            "event_day": expected_empty_trade_bucket,
+            "ordinary_session": expected_trade_bucket,
+        },
+        "macro_event_type_breakdown": {"ordinary_session": expected_trade_bucket},
         "opening_range_breakdown": {"unknown_opening_range": expected_trade_bucket},
         "pending_orders": 0,
         "profit_factor": "0",
@@ -465,6 +470,25 @@ def test_minimal_backtest_reports_robustness_concentration_and_splits(
     assert summary.rolling_6_month_breakdown["2026-06-01_2026-11-29"]["total_pnl"] == "2.0"
 
 
+def test_minimal_backtest_tags_macro_event_sessions(tmp_path: Path) -> None:
+    request = _request_for_day(day=10)
+    _save_macro_event_sample_bars(tmp_path, request)
+
+    summary = run_minimal_backtest(
+        request=request,
+        cache_dir=tmp_path,
+        output_path=None,
+        strategy=get_strategy("close-momentum"),
+        quantity=Decimal("1"),
+    )
+
+    assert summary.closed_trades == 1
+    assert summary.macro_event_day_breakdown["event_day"]["closed_trades"] == 1
+    assert summary.macro_event_day_breakdown["ordinary_session"]["closed_trades"] == 0
+    assert summary.macro_event_type_breakdown["cpi"]["closed_trades"] == 1
+    assert summary.macro_event_type_breakdown["cpi"]["total_pnl"] == "-1.0"
+
+
 def test_session_regime_tags_bucket_gap_opening_range_trend_and_volume() -> None:
     bars = (
         *[
@@ -490,11 +514,15 @@ def test_session_regime_tags_bucket_gap_opening_range_trend_and_volume() -> None
 
 
 def _request() -> HistoricalBarsRequest:
+    return _request_for_day(day=26)
+
+
+def _request_for_day(*, day: int) -> HistoricalBarsRequest:
     return HistoricalBarsRequest(
         instrument=Instrument.us_equity("SPY"),
         timeframe="5Min",
-        start_utc=datetime(2026, 6, 26, 4, 0, tzinfo=UTC),
-        end_utc=datetime(2026, 6, 27, 4, 0, tzinfo=UTC),
+        start_utc=datetime(2026, 6, day, 4, 0, tzinfo=UTC),
+        end_utc=datetime(2026, 6, day + 1, 4, 0, tzinfo=UTC),
     )
 
 
@@ -524,6 +552,21 @@ def _save_two_trade_sample_bars(cache_dir: Path, request: HistoricalBarsRequest)
         _bar_at(day=26, hour=14, minute=0, open=103.0, close=102.0, volume=1_000),
         _bar_at(day=26, hour=14, minute=5, open=102.0, close=101.0, volume=1_000),
         _bar_at(day=26, hour=14, minute=10, open=102.0, close=102.0, volume=1_000),
+    )
+    session_config = MarketSessionConfig.xnys_regular()
+    regular_bars = tuple(
+        bar for bar in bars if session_config.classify(bar.timestamp_utc) == "regular"
+    )
+    LocalMarketDataStore(cache_dir).save_normalized_bars(regular_bars, request, session_config)
+
+
+def _save_macro_event_sample_bars(cache_dir: Path, request: HistoricalBarsRequest) -> None:
+    bars = (
+        _bar_at(day=10, hour=13, minute=30, open=100.0, close=100.0, volume=1_000),
+        _bar_at(day=10, hour=13, minute=35, open=100.0, close=101.0, volume=1_000),
+        _bar_at(day=10, hour=13, minute=40, open=101.5, close=102.0, volume=1_000),
+        _bar_at(day=10, hour=13, minute=45, open=102.0, close=101.0, volume=1_000),
+        _bar_at(day=10, hour=13, minute=50, open=100.5, close=100.0, volume=1_000),
     )
     session_config = MarketSessionConfig.xnys_regular()
     regular_bars = tuple(
