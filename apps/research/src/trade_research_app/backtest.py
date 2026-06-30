@@ -257,6 +257,7 @@ class BacktestSummary:
     daily_breakdown: dict[str, dict[str, str | int]]
     weekday_breakdown: dict[str, dict[str, str | int]]
     time_of_day_breakdown: dict[str, dict[str, str | int]]
+    side_breakdown: dict[str, dict[str, str | int]]
     exit_reason_breakdown: dict[str, dict[str, str | int]]
     holding_time_breakdown: dict[str, dict[str, str | int]]
     gap_breakdown: dict[str, dict[str, str | int]]
@@ -320,6 +321,7 @@ class BacktestSummary:
             "daily_breakdown": self.daily_breakdown,
             "weekday_breakdown": self.weekday_breakdown,
             "time_of_day_breakdown": self.time_of_day_breakdown,
+            "side_breakdown": self.side_breakdown,
             "exit_reason_breakdown": self.exit_reason_breakdown,
             "holding_time_breakdown": self.holding_time_breakdown,
             "gap_breakdown": self.gap_breakdown,
@@ -543,6 +545,7 @@ def run_minimal_backtest(
         closed_trades,
         timezone=session_config.timezone,
     )
+    side_breakdown = _side_breakdown(closed_trades)
     exit_reason_breakdown = _exit_reason_breakdown(closed_trades)
     holding_time_breakdown = _holding_time_breakdown(closed_trades)
     gap_breakdown = _regime_breakdown(closed_trades, tag_name="gap_bucket")
@@ -635,6 +638,7 @@ def run_minimal_backtest(
         daily_breakdown=daily_breakdown,
         weekday_breakdown=weekday_breakdown,
         time_of_day_breakdown=time_of_day_breakdown,
+        side_breakdown=side_breakdown,
         exit_reason_breakdown=exit_reason_breakdown,
         holding_time_breakdown=holding_time_breakdown,
         gap_breakdown=gap_breakdown,
@@ -1513,6 +1517,18 @@ def _time_of_day_breakdown(
     return {bucket: _trade_bucket_summary(trades) for bucket, trades in sorted(buckets.items())}
 
 
+def _side_breakdown(closed_trades: list[ClosedTrade]) -> dict[str, dict[str, str | int]]:
+    """Split completed trades by the direction opened by the strategy."""
+    buckets: dict[str, list[ClosedTrade]] = {
+        "long": [],
+        "short": [],
+    }
+    for trade in closed_trades:
+        bucket = "long" if trade.entry_side == OrderSide.BUY else "short"
+        buckets[bucket].append(trade)
+    return {bucket: _trade_bucket_summary(trades) for bucket, trades in sorted(buckets.items())}
+
+
 def _weekday_breakdown(
     closed_trades: list[ClosedTrade],
     *,
@@ -1717,8 +1733,12 @@ def _trade_bucket_summary(trades: list[ClosedTrade]) -> dict[str, str | int]:
     holding_minutes = [Decimal(trade.holding_minutes) for trade in trades]
     post_exit_max_favorable_pnls = [trade.post_exit_max_favorable_pnl for trade in trades]
     total_pnl = sum(pnls, Decimal("0"))
+    winning_pnls = [pnl for pnl in pnls if pnl > 0]
+    losing_pnls = [pnl for pnl in pnls if pnl < 0]
     winning_trades = sum(1 for pnl in pnls if pnl > 0)
     losing_trades = sum(1 for pnl in pnls if pnl < 0)
+    gross_profit = sum(winning_pnls, Decimal("0"))
+    gross_loss = abs(sum(losing_pnls, Decimal("0")))
     return {
         "closed_trades": len(trades),
         "winning_trades": winning_trades,
@@ -1726,6 +1746,17 @@ def _trade_bucket_summary(trades: list[ClosedTrade]) -> dict[str, str | int]:
         "win_rate": str(Decimal(winning_trades) / Decimal(len(pnls)) if pnls else Decimal("0")),
         "total_pnl": str(total_pnl),
         "expectancy": str(total_pnl / Decimal(len(pnls)) if pnls else Decimal("0")),
+        "average_win": str(
+            gross_profit / Decimal(len(winning_pnls)) if winning_pnls else Decimal("0")
+        ),
+        "average_loss": str(
+            sum(losing_pnls, Decimal("0")) / Decimal(len(losing_pnls))
+            if losing_pnls
+            else Decimal("0")
+        ),
+        "profit_factor": str(
+            gross_profit / gross_loss if gross_profit > 0 and gross_loss > 0 else Decimal("0")
+        ),
         "average_holding_minutes": str(
             sum(holding_minutes, Decimal("0")) / Decimal(len(holding_minutes))
             if holding_minutes

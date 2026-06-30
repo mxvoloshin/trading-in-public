@@ -48,6 +48,7 @@ class _SessionState:
     pullback_low: Decimal | None = None
     pullback_high: Decimal | None = None
     signal_bar_low: Decimal | None = None
+    signal_bar_high: Decimal | None = None
     consecutive_closes_below_vwap: int = 0
     true_ranges: list[Decimal] = field(default_factory=_new_decimal_list)
 
@@ -382,6 +383,177 @@ class SymmetricSpyVwapPullbackStrategy(SpyVwapPullbackStrategy):
 
     name: ClassVar[str] = "spy-vwap-pullback-long-short"
     allow_short: ClassVar[bool] = True
+
+
+@dataclass(slots=True)
+class SpyVwapTrendContinuationLongShortBaseStrategy(SpyVwapPullbackStrategy):
+    """Clean long/short VWAP trend-continuation baseline.
+
+    This strategy starts the second VWAP research cycle from the directional
+    thesis itself instead of inheriting the previous filter stack. It uses only
+    completed regular-session bars, supports both sides symmetrically, and keeps
+    volatility-normalized VWAP proximity as a configurable base constant.
+    """
+
+    name: ClassVar[str] = "spy-vwap-trend-continuation-long-short-base"
+    allow_short: ClassVar[bool] = True
+
+    max_trades_per_day: int = 1
+    first_entry_time: time = time(10, 0)
+    last_entry_time: time = time(14, 30)
+    # The runner fills market intents on the next bar open. Emitting the
+    # flatten decision on the 15:50 bar lets a 5-minute backtest fill at 15:55
+    # instead of carrying the position to the next session open.
+    flatten_from: time = time(15, 50)
+    vwap_near_tolerance_atr: Decimal = Decimal("0.25")
+    atr_period_5m: int = 20
+
+    def _flat_position_decision(
+        self,
+        *,
+        state: _SessionState,
+        bar: Bar,
+    ) -> tuple[DecisionAction, str]:
+        """Return side-aware entry decisions without hiding missing ATR context."""
+        if not self._has_entry_context(state=state, bar=bar):
+            return DecisionAction.HOLD, "entry_context_not_ready"
+        if self._current_atr_5m(state) is None:
+            return DecisionAction.HOLD, "base_atr_not_ready"
+        return SpyVwapPullbackStrategy._flat_position_decision(self, state=state, bar=bar)
+
+    def _long_entry_decision(
+        self,
+        *,
+        state: _SessionState,
+        bar: Bar,
+    ) -> tuple[DecisionAction, str]:
+        """Request a long after bullish VWAP pullback/reclaim confirmation."""
+        current_vwap = _required_decimal(state.current_vwap, "current_vwap")
+        previous_vwap = _required_decimal(state.previous_vwap, "previous_vwap")
+        opening_range_high = _required_decimal(
+            state.first_30_minute_high,
+            "first_30_minute_high",
+        )
+        previous_bar = _required_bar(state.previous_bar)
+        atr_5m = self._current_atr_5m(state)
+        if atr_5m is None:
+            return DecisionAction.HOLD, "base_atr_not_ready"
+
+        current_low = Decimal(str(bar.low))
+        current_close = Decimal(str(bar.close))
+        previous_close = Decimal(str(previous_bar.close))
+        near_vwap_limit = current_vwap + self.vwap_near_tolerance_atr * atr_5m
+
+        if (
+            current_close > current_vwap
+            and current_vwap > previous_vwap
+            and current_close > opening_range_high
+            and current_low <= near_vwap_limit
+            and current_close > previous_close
+        ):
+            state.trades_entered += 1
+            state.signal_bar_low = current_low
+            state.signal_bar_high = Decimal(str(bar.high))
+            return DecisionAction.ENTER_LONG, "long_vwap_trend_continuation_reclaim"
+
+        return DecisionAction.HOLD, "long_base_entry_filter_not_met"
+
+    def _short_entry_decision(
+        self,
+        *,
+        state: _SessionState,
+        bar: Bar,
+    ) -> tuple[DecisionAction, str]:
+        """Request a short after bearish VWAP pullback/rejection confirmation."""
+        current_vwap = _required_decimal(state.current_vwap, "current_vwap")
+        previous_vwap = _required_decimal(state.previous_vwap, "previous_vwap")
+        opening_range_low = _required_decimal(
+            state.first_30_minute_low,
+            "first_30_minute_low",
+        )
+        previous_bar = _required_bar(state.previous_bar)
+        atr_5m = self._current_atr_5m(state)
+        if atr_5m is None:
+            return DecisionAction.HOLD, "base_atr_not_ready"
+
+        current_high = Decimal(str(bar.high))
+        current_close = Decimal(str(bar.close))
+        previous_close = Decimal(str(previous_bar.close))
+        near_vwap_limit = current_vwap - self.vwap_near_tolerance_atr * atr_5m
+
+        if (
+            current_close < current_vwap
+            and current_vwap < previous_vwap
+            and current_close < opening_range_low
+            and current_high >= near_vwap_limit
+            and current_close < previous_close
+        ):
+            state.trades_entered += 1
+            state.signal_bar_low = Decimal(str(bar.low))
+            state.signal_bar_high = current_high
+            return DecisionAction.ENTER_SHORT, "short_vwap_trend_continuation_rejection"
+
+        return DecisionAction.HOLD, "short_base_entry_filter_not_met"
+
+    def _open_long_decision(
+        self,
+        *,
+        state: _SessionState,
+        bar: Bar,
+    ) -> tuple[DecisionAction, str]:
+        """Exit long baseline trades on VWAP loss, signal failure, or EOD."""
+        local_time = bar.timestamp_utc.astimezone(NEW_YORK).time()
+        current_close = Decimal(str(bar.close))
+        current_vwap = _required_decimal(state.current_vwap, "current_vwap")
+
+        if local_time >= self.flatten_from:
+            return DecisionAction.EXIT_LONG, "end_of_day_flatten"
+        if state.signal_bar_low is not None and current_close < state.signal_bar_low:
+            return DecisionAction.EXIT_LONG, "close_below_signal_bar_low"
+        if current_close < current_vwap:
+            return DecisionAction.EXIT_LONG, "close_below_vwap"
+        return DecisionAction.HOLD, "long_base_thesis_still_valid"
+
+    def _open_short_decision(
+        self,
+        *,
+        state: _SessionState,
+        bar: Bar,
+    ) -> tuple[DecisionAction, str]:
+        """Exit short baseline trades on VWAP reclaim, signal failure, or EOD."""
+        local_time = bar.timestamp_utc.astimezone(NEW_YORK).time()
+        current_close = Decimal(str(bar.close))
+        current_vwap = _required_decimal(state.current_vwap, "current_vwap")
+
+        if local_time >= self.flatten_from:
+            return DecisionAction.EXIT_SHORT, "end_of_day_flatten"
+        if state.signal_bar_high is not None and current_close > state.signal_bar_high:
+            return DecisionAction.EXIT_SHORT, "close_above_signal_bar_high"
+        if current_close > current_vwap:
+            return DecisionAction.EXIT_SHORT, "close_above_vwap"
+        return DecisionAction.HOLD, "short_base_thesis_still_valid"
+
+    def _has_entry_context(self, *, state: _SessionState, bar: Bar) -> bool:
+        """Return whether the clean baseline can consider a new entry."""
+        local_time = bar.timestamp_utc.astimezone(NEW_YORK).time()
+        if local_time < self.first_entry_time:
+            return False
+        if local_time > self.last_entry_time:
+            return False
+        if state.trades_entered >= self.max_trades_per_day:
+            return False
+        if state.current_vwap is None or state.previous_vwap is None:
+            return False
+        if state.previous_bar is None:
+            return False
+        return state.first_30_minute_high is not None and state.first_30_minute_low is not None
+
+    def _current_atr_5m(self, state: _SessionState) -> Decimal | None:
+        """Return the current intraday 5-minute ATR if enough bars exist."""
+        if len(state.true_ranges) < self.atr_period_5m:
+            return None
+        trailing_ranges = state.true_ranges[-self.atr_period_5m :]
+        return sum(trailing_ranges, Decimal("0")) / Decimal(self.atr_period_5m)
 
 
 @dataclass(slots=True)

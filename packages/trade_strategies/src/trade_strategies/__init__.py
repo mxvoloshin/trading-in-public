@@ -11,6 +11,7 @@ from trade_strategies.spy_vwap_pullback import (
     OpeningDriveQualityVwapReclaimStrategy,
     RvolBucketVwapReclaimStrategy,
     SpyVwapPullbackStrategy,
+    SpyVwapTrendContinuationLongShortBaseStrategy,
     SymmetricSpyVwapPullbackStrategy,
     TrendDayVwapReclaimStrategy,
 )
@@ -26,6 +27,7 @@ __all__ = [
     "OpeningDriveQualityVwapReclaimStrategy",
     "PACKAGE_NAME",
     "RvolBucketVwapReclaimStrategy",
+    "SpyVwapTrendContinuationLongShortBaseStrategy",
     "SpyVwapPullbackStrategy",
     "Strategy",
     "StrategyDecisionContext",

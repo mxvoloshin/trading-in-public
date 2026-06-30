@@ -45,26 +45,32 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
     assert summary.total_pnl == Decimal("-1.0")
     expected_trade_bucket = {
         "average_holding_minutes": "10",
+        "average_loss": "-1.0",
         "average_post_exit_max_favorable_pnl": "0.0",
+        "average_win": "0",
         "closed_trades": 1,
         "expectancy": "-1.0",
         "losing_trades": 1,
         "max_post_exit_max_favorable_pnl": "0.0",
         "median_holding_minutes": "10",
         "median_post_exit_max_favorable_pnl": "0.0",
+        "profit_factor": "0",
         "total_pnl": "-1.0",
         "win_rate": "0",
         "winning_trades": 0,
     }
     expected_empty_trade_bucket = {
         "average_holding_minutes": "0",
+        "average_loss": "0",
         "average_post_exit_max_favorable_pnl": "0",
+        "average_win": "0",
         "closed_trades": 0,
         "expectancy": "0",
         "losing_trades": 0,
         "max_post_exit_max_favorable_pnl": "0",
         "median_holding_minutes": "0",
         "median_post_exit_max_favorable_pnl": "0",
+        "profit_factor": "0",
         "total_pnl": "0",
         "win_rate": "0",
         "winning_trades": 0,
@@ -148,6 +154,10 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
         "profit_factor": "0",
         "realized_pnl": "-1.0",
         "relative_volume_breakdown": {"unknown_relative_volume": expected_trade_bucket},
+        "side_breakdown": {
+            "long": expected_trade_bucket,
+            "short": expected_empty_trade_bucket,
+        },
         "vwap_distance_atr_breakdown": {"unknown_vwap_distance_atr": expected_trade_bucket},
         "rolling_3_month_breakdown": {
             "2026-06-01_2026-08-30": expected_trade_bucket,
@@ -414,20 +424,43 @@ def test_minimal_backtest_reports_trade_breakdowns(tmp_path: Path) -> None:
     assert summary.max_post_exit_max_favorable_pnl == Decimal("0.0")
     expected_trade_bucket = {
         "average_holding_minutes": "10",
+        "average_loss": "-1.0",
         "average_post_exit_max_favorable_pnl": "0.0",
+        "average_win": "0",
         "closed_trades": 1,
         "expectancy": "-1.0",
         "losing_trades": 1,
         "max_post_exit_max_favorable_pnl": "0.0",
         "median_holding_minutes": "10",
         "median_post_exit_max_favorable_pnl": "0.0",
+        "profit_factor": "0",
         "total_pnl": "-1.0",
+        "win_rate": "0",
+        "winning_trades": 0,
+    }
+    expected_empty_trade_bucket = {
+        "average_holding_minutes": "0",
+        "average_loss": "0",
+        "average_post_exit_max_favorable_pnl": "0",
+        "average_win": "0",
+        "closed_trades": 0,
+        "expectancy": "0",
+        "losing_trades": 0,
+        "max_post_exit_max_favorable_pnl": "0",
+        "median_holding_minutes": "0",
+        "median_post_exit_max_favorable_pnl": "0",
+        "profit_factor": "0",
+        "total_pnl": "0",
         "win_rate": "0",
         "winning_trades": 0,
     }
     assert summary.daily_breakdown == {"2026-06-26": expected_trade_bucket}
     assert summary.weekday_breakdown == {"4_Friday": expected_trade_bucket}
     assert summary.time_of_day_breakdown == {"09:30-10:00": expected_trade_bucket}
+    assert summary.side_breakdown == {
+        "long": expected_trade_bucket,
+        "short": expected_empty_trade_bucket,
+    }
     assert summary.exit_reason_breakdown == {"close_below_previous_close": expected_trade_bucket}
     assert summary.holding_time_breakdown == {"00-30m": expected_trade_bucket}
     assert summary.gap_breakdown == {"unknown_gap": expected_trade_bucket}

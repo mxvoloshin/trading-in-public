@@ -20,6 +20,7 @@ from trade_strategies import (
     OpeningDriveQualityVwapReclaimStrategy,
     RvolBucketVwapReclaimStrategy,
     SpyVwapPullbackStrategy,
+    SpyVwapTrendContinuationLongShortBaseStrategy,
     StrategyDecisionContext,
     SymmetricSpyVwapPullbackStrategy,
     TrendDayVwapReclaimStrategy,
@@ -592,6 +593,67 @@ def test_dynamic_vwap_distance_reclaim_waits_for_atr_history() -> None:
     assert "dynamic_vwap_distance_atr_not_ready" in decisions[-1].reason
 
 
+def test_long_short_trend_continuation_base_enters_long_on_vwap_reclaim() -> None:
+    strategy = SpyVwapTrendContinuationLongShortBaseStrategy(atr_period_5m=2)
+
+    decisions = _decisions_for_bars(
+        strategy,
+        _long_short_base_long_setup_bars(),
+        position_quantity=Decimal("0"),
+    )
+
+    assert decisions[-1].action == DecisionAction.ENTER_LONG
+    assert decisions[-1].strategy_name == "spy-vwap-trend-continuation-long-short-base"
+    assert "long_vwap_trend_continuation_reclaim" in decisions[-1].reason
+
+
+def test_long_short_trend_continuation_base_enters_short_on_vwap_rejection() -> None:
+    strategy = SpyVwapTrendContinuationLongShortBaseStrategy(atr_period_5m=2)
+
+    decisions = _decisions_for_bars(
+        strategy,
+        _long_short_base_short_setup_bars(),
+        position_quantity=Decimal("0"),
+    )
+
+    assert decisions[-1].action == DecisionAction.ENTER_SHORT
+    assert decisions[-1].strategy_name == "spy-vwap-trend-continuation-long-short-base"
+    assert "short_vwap_trend_continuation_rejection" in decisions[-1].reason
+
+
+def test_long_short_trend_continuation_base_exits_long_on_signal_low_failure() -> None:
+    strategy = SpyVwapTrendContinuationLongShortBaseStrategy(atr_period_5m=2)
+    setup_bars = _long_short_base_long_setup_bars()
+    _decisions_for_bars(strategy, setup_bars, position_quantity=Decimal("0"))
+
+    exit_bar = _bar(index=7, open=103.8, high=104.0, low=100.8, close=101.0)
+    decision = strategy.decide(
+        bar=exit_bar,
+        context=_context(
+            bar=exit_bar,
+            sequence_number=8,
+            previous_bar=setup_bars[-1],
+            position_quantity=Decimal("1"),
+        ),
+    )
+
+    assert decision.action == DecisionAction.EXIT_LONG
+    assert "close_below_signal_bar_low" in decision.reason
+
+
+def test_long_short_trend_continuation_base_waits_for_atr_history() -> None:
+    strategy = SpyVwapTrendContinuationLongShortBaseStrategy(atr_period_5m=20)
+
+    decisions = _decisions_for_bars(
+        strategy,
+        _long_short_base_long_setup_bars(),
+        position_quantity=Decimal("0"),
+    )
+
+    assert decisions[-1].action == DecisionAction.HOLD
+    assert "base_atr_not_ready" in decisions[-1].reason
+
+
 def test_spy_vwap_pullback_respects_max_daily_trades() -> None:
     strategy = SpyVwapPullbackStrategy(max_trades_per_day=1)
     first_setup = (
@@ -686,6 +748,12 @@ def test_strategy_registry_returns_dynamic_vwap_distance_reclaim() -> None:
     assert strategy.name == "trend-day-vwap-reclaim-v5-dynamic-vwap-distance"
 
 
+def test_strategy_registry_returns_long_short_trend_continuation_base() -> None:
+    strategy = get_strategy("spy-vwap-trend-continuation-long-short-base")
+
+    assert strategy.name == "spy-vwap-trend-continuation-long-short-base"
+
+
 def _decisions_for_bars(
     strategy: SpyVwapPullbackStrategy | SymmetricSpyVwapPullbackStrategy,
     bars: tuple[Bar, ...],
@@ -719,6 +787,30 @@ def _trend_day_reclaim_setup_bars(*, day: int = 26, volume: int = 1_000) -> tupl
         _bar(index=5, open=104.0, high=105.5, low=104.0, close=105.0, day=day, volume=volume),
         _bar(index=6, open=104.0, high=104.0, low=102.0, close=103.0, day=day, volume=volume),
         _bar(index=7, open=103.5, high=105.2, low=101.0, close=105.0, day=day, volume=volume),
+    )
+
+
+def _long_short_base_long_setup_bars() -> tuple[Bar, ...]:
+    return (
+        _bar(index=0, open=100.0, high=101.0, low=99.0, close=100.0),
+        _bar(index=1, open=100.0, high=101.0, low=100.0, close=100.5),
+        _bar(index=2, open=100.5, high=102.0, low=100.5, close=101.0),
+        _bar(index=3, open=101.0, high=102.0, low=101.0, close=101.5),
+        _bar(index=4, open=101.5, high=103.0, low=101.5, close=102.0),
+        _bar(index=5, open=102.0, high=103.0, low=102.0, close=102.5),
+        _bar(index=6, open=102.8, high=104.5, low=101.5, close=104.0),
+    )
+
+
+def _long_short_base_short_setup_bars() -> tuple[Bar, ...]:
+    return (
+        _bar(index=0, open=100.0, high=101.0, low=99.0, close=100.0),
+        _bar(index=1, open=100.0, high=100.0, low=99.0, close=99.5),
+        _bar(index=2, open=99.5, high=99.5, low=98.0, close=99.0),
+        _bar(index=3, open=99.0, high=99.0, low=98.0, close=98.5),
+        _bar(index=4, open=98.5, high=98.5, low=97.0, close=98.0),
+        _bar(index=5, open=98.0, high=98.0, low=97.0, close=97.5),
+        _bar(index=6, open=97.2, high=98.5, low=95.5, close=96.0),
     )
 
 
