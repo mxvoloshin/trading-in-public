@@ -3,6 +3,10 @@ name = "trade-analytics"
 version = "0.0.1"
 description = "Analytics, reporting, and reconciliation summaries."
 requires-python = ">=3.12"
+dependencies = [
+    "trade-core",
+    "trade-data",
+]
 
 [build-system]
 requires = ["hatchling"]

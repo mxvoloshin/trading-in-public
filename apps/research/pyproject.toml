@@ -4,6 +4,7 @@ version = "0.0.1"
 description = "Research and backtesting app entrypoint."
 requires-python = ">=3.12"
 dependencies = [
+    "trade-analytics",
     "trade-core",
     "trade-data",
     "trade-strategies",

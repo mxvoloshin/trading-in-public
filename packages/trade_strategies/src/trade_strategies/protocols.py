@@ -36,6 +36,23 @@ class StrategyDecisionContext:
     average_entry_price: Decimal = Decimal("0")
 
 
+@dataclass(frozen=True, slots=True)
+class OpenTradeDiagnostics:
+    """Strategy-owned context captured at entry for R-multiple computation.
+
+    The engine asks the strategy for this right after an opening fill. It
+    contains the values the strategy set during its ``decide()`` call that
+    the engine needs to compute per-trade diagnostics — most importantly
+    the initial stop price (R denominator).
+
+    Parameters:
+        initial_stop_price: Stop price the strategy set at entry time. Used
+            as the R denominator. Zero means no stop / R undefined.
+    """
+
+    initial_stop_price: Decimal = Decimal("0")
+
+
 class Strategy(Protocol):
     """Minimal strategy seam: market input in, shared decision out.
 
@@ -58,4 +75,33 @@ class Strategy(Protocol):
             bar: Current normalized bar being evaluated.
             context: Runner-owned facts about the current run and position.
         """
+        ...
+
+
+class StrategyWithDiagnostics(Protocol):
+    """Strategy that also contributes per-trade diagnostics context.
+
+    Strategies that own trade-level state useful for R-multiple computation
+    (most importantly the initial stop price) implement this extended protocol.
+    The engine asks the strategy for ``OpenTradeDiagnostics`` right after an
+    opening fill, so the strategy can report the stop it set during ``decide()``.
+
+    Strategies that don't need to contribute diagnostics implement only
+    ``Strategy``; the engine falls back to a zero ``initial_stop_price``,
+    meaning R multiples are undefined for those trades.
+    """
+
+    name: ClassVar[str]
+
+    def decide(
+        self,
+        *,
+        bar: Bar,
+        context: StrategyDecisionContext,
+    ) -> StrategyDecision:
+        """Evaluate one completed bar and return a shared strategy decision."""
+        ...
+
+    def on_entry(self) -> OpenTradeDiagnostics:
+        """Return diagnostics context for the trade just opened."""
         ...

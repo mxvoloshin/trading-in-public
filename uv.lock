@@ -195,6 +195,16 @@ wheels = [
 name = "trade-analytics"
 version = "0.0.1"
 source = { editable = "packages/trade_analytics" }
+dependencies = [
+    { name = "trade-core" },
+    { name = "trade-data" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "trade-core", editable = "packages/trade_core" },
+    { name = "trade-data", editable = "packages/trade_data" },
+]
 
 [[package]]
 name = "trade-brokers"
@@ -232,6 +242,7 @@ name = "trade-research-app"
 version = "0.0.1"
 source = { editable = "apps/research" }
 dependencies = [
+    { name = "trade-analytics" },
     { name = "trade-core" },
     { name = "trade-data" },
     { name = "trade-strategies" },
@@ -239,6 +250,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "trade-analytics", editable = "packages/trade_analytics" },
     { name = "trade-core", editable = "packages/trade_core" },
     { name = "trade-data", editable = "packages/trade_data" },
     { name = "trade-strategies", editable = "packages/trade_strategies" },

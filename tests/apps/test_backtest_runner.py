@@ -19,7 +19,7 @@ from trade_research_app.backtest import (
     session_regime_tags,
 )
 from trade_research_app.cli import main
-from trade_strategies import StrategyDecisionContext, get_strategy
+from trade_strategies import OpenTradeDiagnostics, StrategyDecisionContext, get_strategy
 
 
 def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -> None:
@@ -1037,6 +1037,9 @@ class _ScriptedLongDiagnosticsStrategy:
             ),
         )
 
+    def on_entry(self) -> OpenTradeDiagnostics:
+        return OpenTradeDiagnostics(initial_stop_price=self._state.active_stop or Decimal("0"))
+
 
 class _ScriptedShortDiagnosticsStrategy:
     name: ClassVar[str] = "scripted-short-diagnostics"
@@ -1071,3 +1074,6 @@ class _ScriptedShortDiagnosticsStrategy:
                 f"{context.strategy_run_id.value}-strategy-decision-{context.sequence_number:04d}"
             ),
         )
+
+    def on_entry(self) -> OpenTradeDiagnostics:
+        return OpenTradeDiagnostics(initial_stop_price=self._state.active_stop or Decimal("0"))

@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from trade_core import DecisionAction, InstrumentRef, StrategyDecision, StrategyDecisionId
 from trade_data import Bar
 
-from trade_strategies.protocols import StrategyDecisionContext
+from trade_strategies.protocols import OpenTradeDiagnostics, StrategyDecisionContext
 
 NEW_YORK = ZoneInfo("America/New_York")
 
@@ -97,6 +97,17 @@ class SpyOpeningRangeBreakoutTrendHoldStrategy:
             )
 
         return self._decision(action=action, bar=bar, context=context, reason=reason)
+
+    def on_entry(self) -> OpenTradeDiagnostics:
+        """Return the current active stop as the R-multiple denominator.
+
+        The stop was set during the most recent ``decide()`` call that produced
+        an entry signal. By the time the engine calls this (right after the
+        opening fill), ``_state.active_stop`` holds that value.
+        """
+        if self._state is not None and self._state.active_stop is not None:
+            return OpenTradeDiagnostics(initial_stop_price=self._state.active_stop)
+        return OpenTradeDiagnostics()
 
     def _state_for_bar(self, bar: Bar) -> _SessionState:
         """Return the current session state, resetting on a new local date."""
