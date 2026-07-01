@@ -33,11 +33,10 @@ Start here before implementation work:
 - `docs/architecture/service-map.md`
 - `docs/architecture/implementation-principles.md`
 
-## Research Decisions
+## Research Workflow
 
-- `docs/research/historical-market-data-source.md`
-- `docs/research/ibkr-api-shape.md`
-- `docs/research/shared-core-boundary.md`
+- `docs/research-workflow.md`
+- `docs/research-artifacts.md`
 
 ## Market Data
 
@@ -57,10 +56,11 @@ See `docs/market-data.md` for Alpaca credentials, local cache layout, and public
 
 ## Backtesting
 
-Run the first minimal backtest against locally cached normalized bars:
+Run a minimal backtest against locally cached normalized bars:
 
 ```sh
 uv run python -m trade_research_app backtest run \
+  --strategy spy-opening-range-breakout-trend-hold-midpoint-stop-max-1 \
   --symbol SPY \
   --timeframe 5Min \
   --start 2025-06-28 \
@@ -90,7 +90,9 @@ apps/
   reconcile/
 ```
 
-These folders are scaffolded as importable packages. Market data behavior starts in `packages/trade_data` and `apps/research`; strategy, broker, backtesting, and reconciliation contracts will be added by later implementation issues.
+These folders are importable workspace packages. The active research path lives
+mainly in `packages/trade_data`, `packages/trade_strategies`, and
+`apps/research`.
 
 Local market data, backtest outputs, credentials, broker exports, and other private artifacts must not be committed.
 

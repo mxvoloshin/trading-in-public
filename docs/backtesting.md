@@ -6,6 +6,11 @@ normalized bars and writes a gitignored JSON summary artifact.
 This document explains how to run it. Strategy research notes and result
 writeups belong in `docs/research/`, not here.
 
+For the repo-level research procedure and artifact organization rules, see:
+
+- `docs/research-workflow.md`
+- `docs/research-artifacts.md`
+
 ## Prepare Data
 
 Fetch or otherwise populate the local normalized bar cache first:
@@ -33,7 +38,7 @@ Run the default registered strategy:
 
 ```sh
 uv run python -m trade_research_app backtest run \
-  --strategy close-momentum \
+  --strategy spy-opening-range-breakout-trend-hold-midpoint-stop-max-1 \
   --symbol SPY \
   --timeframe 5Min \
   --start 2025-06-28 \
@@ -78,7 +83,7 @@ Costs are opt-in CLI inputs. Defaults are zero.
 
 ```sh
 uv run python -m trade_research_app backtest run \
-  --strategy close-momentum \
+  --strategy spy-opening-range-breakout-trend-hold-midpoint-stop-max-1 \
   --symbol SPY \
   --timeframe 5Min \
   --start 2025-06-28 \
@@ -109,7 +114,7 @@ across the standard execution-cost scenarios:
 
 ```sh
 uv run python -m trade_research_app backtest cost-stress \
-  --strategy close-momentum \
+  --strategy spy-opening-range-breakout-trend-hold-midpoint-stop-max-1 \
   --symbol SPY \
   --timeframe 5Min \
   --start 2025-06-28 \
@@ -144,13 +149,9 @@ Backtests select strategies by name with `--strategy`. The active registry is in
 
 `packages/trade_strategies/src/trade_strategies/registry.py`
 
-The current branch exposes these built-in CLI strategies:
+Use the registry as the source of truth for runnable CLI strategies.
 
-- `close-momentum`
-- `spy-opening-range-breakout-trend-hold-midpoint-stop-max-1`
-
-If a strategy is not registered there, it is not runnable from the CLI even if
-older research notes mention it.
+If a strategy is not registered there, it is not runnable from the CLI.
 
 ## Execution Semantics
 
