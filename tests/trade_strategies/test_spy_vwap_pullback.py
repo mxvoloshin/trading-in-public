@@ -21,6 +21,7 @@ from trade_strategies import (
     GapAndGoVwapPullbackStrategy,
     OpeningDriveQualityVwapReclaimStrategy,
     RvolBucketVwapReclaimStrategy,
+    SpyOpeningRangeBreakoutMidpointStopMaxOneStrategy,
     SpyVwapPullbackStrategy,
     SpyVwapRangeReversionOneAndHalfAtrBandStrategy,
     SpyVwapTrendContinuationActiveRvolFilterStrategy,
@@ -38,11 +39,61 @@ from trade_strategies import (
     SpyVwapTrendContinuationSignalQualityBreakEntryStrategy,
     SpyVwapTrendContinuationStrongSignalQualityFilterStrategy,
     SpyVwapTrendContinuationTimeStopStrategy,
+    Strategy,
     StrategyDecisionContext,
     SymmetricSpyVwapPullbackStrategy,
     TrendDayVwapReclaimStrategy,
     get_strategy,
 )
+
+
+def test_orb_midpoint_strategy_enters_long_after_close_breakout() -> None:
+    strategy = SpyOpeningRangeBreakoutMidpointStopMaxOneStrategy()
+    bars = (
+        _bar(index=0, open=100.0, high=100.4, low=99.9, close=100.1),
+        _bar(index=1, open=100.1, high=100.5, low=100.0, close=100.2),
+        _bar(index=2, open=100.2, high=100.6, low=100.1, close=100.3),
+        _bar(index=3, open=100.3, high=100.7, low=100.2, close=100.4),
+        _bar(index=4, open=100.4, high=100.8, low=100.3, close=100.5),
+        _bar(index=5, open=100.5, high=100.9, low=100.4, close=100.6),
+        _bar(index=6, open=100.6, high=101.2, low=100.5, close=101.1),
+    )
+
+    decisions = _decisions_for_bars(strategy, bars, position_quantity=Decimal("0"))
+
+    assert decisions[-1].action == DecisionAction.ENTER_LONG
+    assert decisions[-1].strategy_name == strategy.name
+    assert "orb_close_breakout_long" in decisions[-1].reason
+
+
+def test_orb_midpoint_strategy_exits_long_at_stop_price() -> None:
+    strategy = SpyOpeningRangeBreakoutMidpointStopMaxOneStrategy()
+    setup_bars = (
+        _bar(index=0, open=100.0, high=100.4, low=99.9, close=100.1),
+        _bar(index=1, open=100.1, high=100.5, low=100.0, close=100.2),
+        _bar(index=2, open=100.2, high=100.6, low=100.1, close=100.3),
+        _bar(index=3, open=100.3, high=100.7, low=100.2, close=100.4),
+        _bar(index=4, open=100.4, high=100.8, low=100.3, close=100.5),
+        _bar(index=5, open=100.5, high=100.9, low=100.4, close=100.6),
+        _bar(index=6, open=100.6, high=101.2, low=100.5, close=101.1),
+    )
+    _decisions_for_bars(strategy, setup_bars, position_quantity=Decimal("0"))
+
+    stop_bar = _bar(index=7, open=100.9, high=101.0, low=100.2, close=100.4)
+    decision = strategy.decide(
+        bar=stop_bar,
+        context=_context(
+            bar=stop_bar,
+            sequence_number=8,
+            previous_bar=setup_bars[-1],
+            position_quantity=Decimal("1"),
+        ),
+    )
+
+    assert decision.action == DecisionAction.EXIT_LONG
+    assert "orb_stop_long@" in decision.reason
+
+
 
 
 def test_spy_vwap_pullback_enters_after_pullback_and_trend_resumption() -> None:
@@ -1263,7 +1314,7 @@ def test_range_reversion_short_same_bar_stop_beats_target_when_both_hit() -> Non
 
 
 def _decisions_for_bars(
-    strategy: SpyVwapPullbackStrategy | SymmetricSpyVwapPullbackStrategy,
+    strategy: Strategy,
     bars: tuple[Bar, ...],
     *,
     position_quantity: Decimal,

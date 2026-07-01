@@ -6,11 +6,17 @@ from collections.abc import Callable
 
 from trade_strategies.close_momentum import CloseMomentumStrategy
 from trade_strategies.protocols import Strategy
+from trade_strategies.spy_opening_range_breakout import (
+    SpyOpeningRangeBreakoutMidpointStopMaxOneStrategy,
+)
 
 StrategyFactory = Callable[[], Strategy]
 
 _STRATEGIES: dict[str, StrategyFactory] = {
     CloseMomentumStrategy.name: CloseMomentumStrategy,
+    SpyOpeningRangeBreakoutMidpointStopMaxOneStrategy.name: (
+        SpyOpeningRangeBreakoutMidpointStopMaxOneStrategy
+    ),
 }
 
 

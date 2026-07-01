@@ -116,6 +116,7 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
         "average_win": "0",
         "bars_loaded": 5,
         "best_trade_pnl": "-1.0",
+        "costed_pnl": "-1.0",
         "closed_trades": 1,
         "cost_per_closed_trade": "0.0",
         "chronological_split_breakdown": {
@@ -127,6 +128,7 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
         "day_contribution_breakdown": expected_day_contribution,
         "decisions": 5,
         "ending_position": "0",
+        "exit_type_breakdown": {"close_below_previous_close": expected_trade_bucket},
         "exit_reason_breakdown": {"close_below_previous_close": expected_trade_bucket},
         "expectancy_per_day": "-1.0",
         "expectancy_per_trade": "-1.0",
@@ -140,8 +142,14 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
             "long:chop_or_mixed_diagnostic": expected_trade_bucket
         },
         "gap_breakdown": {"unknown_gap": expected_trade_bucket},
+        "gross_pnl": "-1.0",
         "holding_time_breakdown": {"00-30m": expected_trade_bucket},
         "instrument_id": "SPY.US",
+        "largest_trade_pct_of_total_pnl": "1",
+        "long_expectancy": "-1.0",
+        "long_pf": "0",
+        "long_pnl": "-1.0",
+        "long_trades": 1,
         "longest_holding_minutes": 10,
         "losing_trades": 1,
         "max_drawdown": "-1.0",
@@ -151,6 +159,7 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
         "median_holding_minutes": "10",
         "median_post_exit_max_favorable_pnl": "0.0",
         "median_trade_pnl": "-1.0",
+        "month_breakdown": {"2026-06": expected_trade_bucket},
         "minimum_commission": "0",
         "macro_event_day_breakdown": {
             "event_day": expected_empty_trade_bucket,
@@ -164,12 +173,17 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
         "profit_factor": "0",
         "realized_pnl": "-1.0",
         "relative_volume_breakdown": {"unknown_relative_volume": expected_trade_bucket},
+        "opening_range_pct_breakdown": {"unknown_opening_range_pct": expected_trade_bucket},
         "side_breakdown": {
             "long": expected_trade_bucket,
             "short": expected_empty_trade_bucket,
         },
         "signal_bar_body_pct_breakdown": {"0.80-1.00": expected_trade_bucket},
         "signal_bar_close_location_breakdown": {"0.80-1.00": expected_trade_bucket},
+        "short_expectancy": "0",
+        "short_pf": "0",
+        "short_pnl": "0",
+        "short_trades": 0,
         "vwap_distance_atr_breakdown": {"unknown_vwap_distance_atr": expected_trade_bucket},
         "vwap_opening_range_confluence_breakdown": {
             "unknown_vwap_opening_range_confluence": expected_trade_bucket
@@ -180,14 +194,19 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
         "rolling_6_month_breakdown": {
             "2026-06-01_2026-11-29": expected_trade_bucket,
         },
+        "worst_rolling_3_month": "-1.0",
+        "worst_rolling_6_month": "-1.0",
         "commission_per_share": "0",
         "slippage_bps": "0",
         "strategy_name": "close-momentum",
+        "variant_name": "close-momentum",
         "timeframe": "5Min",
         "total_commissions": "0",
         "total_execution_costs": "0.0",
         "total_slippage_cost": "0.0",
         "total_pnl": "-1.0",
+        "top_5_absolute_trades_pct_of_total_pnl": "1",
+        "trades": 1,
         "trade_contribution_breakdown": expected_trade_contribution,
         "time_of_day_breakdown": {"09:30-10:00": expected_trade_bucket},
         "trend_breakdown": {"chop_or_mixed": expected_trade_bucket},
@@ -196,6 +215,7 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
         "win_rate": "0",
         "winning_trades": 0,
         "worst_trade_pnl": "-1.0",
+        "year_breakdown": {"2026": expected_trade_bucket},
     }
 
 
@@ -230,7 +250,12 @@ def test_backtest_cli_runs_against_local_cache(
 
     assert exit_code == 0
     output = capsys.readouterr().out
+    assert "strategy_name=close-momentum" in output
+    assert "variant_name=close-momentum" in output
     assert "strategy=close-momentum" in output
+    assert "trades=1" in output
+    assert "gross_pnl=-1.0" in output
+    assert "costed_pnl=-1.0" in output
     assert "bars_loaded=5" in output
     assert "pending_orders=0" in output
     assert "realized_pnl=-1.0" in output
