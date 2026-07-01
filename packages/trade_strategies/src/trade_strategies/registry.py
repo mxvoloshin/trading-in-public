@@ -6,119 +6,11 @@ from collections.abc import Callable
 
 from trade_strategies.close_momentum import CloseMomentumStrategy
 from trade_strategies.protocols import Strategy
-from trade_strategies.spy_vwap_pullback import (
-    DailyContextVwapReclaimStrategy,
-    DynamicVwapDistanceReclaimStrategy,
-    EntryFilteredTrendDayVwapReclaimStrategy,
-    GapAndGoVwapPullbackStrategy,
-    OpeningDriveQualityVwapReclaimStrategy,
-    RvolBucketVwapReclaimStrategy,
-    SpyVwapPullbackStrategy,
-    SpyVwapRangeReversionOneAndHalfAtrBandStrategy,
-    SpyVwapRangeReversionOneAtrBandStrategy,
-    SpyVwapRangeReversionStrategy,
-    SpyVwapTrendContinuationActiveRvolFilterStrategy,
-    SpyVwapTrendContinuationAtrDistanceFilterStrategy,
-    SpyVwapTrendContinuationBasicSignalQualityFilterStrategy,
-    SpyVwapTrendContinuationDailyTrendFilterStrategy,
-    SpyVwapTrendContinuationInitialStopStrategy,
-    SpyVwapTrendContinuationLongShortBaseStrategy,
-    SpyVwapTrendContinuationLooseRvolFilterStrategy,
-    SpyVwapTrendContinuationNormalToActiveRvolFilterStrategy,
-    SpyVwapTrendContinuationOneAndHalfRTargetStrategy,
-    SpyVwapTrendContinuationOneRTargetStrategy,
-    SpyVwapTrendContinuationOneRTargetTimeStopStrategy,
-    SpyVwapTrendContinuationOpeningDriveFilterStrategy,
-    SpyVwapTrendContinuationOpeningRangeConfluenceFilterStrategy,
-    SpyVwapTrendContinuationOpeningRangeConfluenceLooseFilterStrategy,
-    SpyVwapTrendContinuationOpeningRangeConfluenceStrictFilterStrategy,
-    SpyVwapTrendContinuationSignalBreakEntryStrategy,
-    SpyVwapTrendContinuationSignalQualityBreakEntryStrategy,
-    SpyVwapTrendContinuationStrongSignalQualityFilterStrategy,
-    SpyVwapTrendContinuationTimeStopSixBarStrategy,
-    SpyVwapTrendContinuationTimeStopStrategy,
-    SpyVwapTrendContinuationTimeStopThreeBarStrategy,
-    SpyVwapTrendContinuationTwoRTargetStrategy,
-    SymmetricSpyVwapPullbackStrategy,
-    TrendDayVwapReclaimStrategy,
-)
 
 StrategyFactory = Callable[[], Strategy]
 
 _STRATEGIES: dict[str, StrategyFactory] = {
     CloseMomentumStrategy.name: CloseMomentumStrategy,
-    SpyVwapPullbackStrategy.name: SpyVwapPullbackStrategy,
-    SymmetricSpyVwapPullbackStrategy.name: SymmetricSpyVwapPullbackStrategy,
-    TrendDayVwapReclaimStrategy.name: TrendDayVwapReclaimStrategy,
-    EntryFilteredTrendDayVwapReclaimStrategy.name: EntryFilteredTrendDayVwapReclaimStrategy,
-    GapAndGoVwapPullbackStrategy.name: GapAndGoVwapPullbackStrategy,
-    DailyContextVwapReclaimStrategy.name: DailyContextVwapReclaimStrategy,
-    OpeningDriveQualityVwapReclaimStrategy.name: OpeningDriveQualityVwapReclaimStrategy,
-    RvolBucketVwapReclaimStrategy.name: RvolBucketVwapReclaimStrategy,
-    DynamicVwapDistanceReclaimStrategy.name: DynamicVwapDistanceReclaimStrategy,
-    SpyVwapRangeReversionStrategy.name: SpyVwapRangeReversionStrategy,
-    SpyVwapRangeReversionOneAtrBandStrategy.name: SpyVwapRangeReversionOneAtrBandStrategy,
-    SpyVwapRangeReversionOneAndHalfAtrBandStrategy.name: (
-        SpyVwapRangeReversionOneAndHalfAtrBandStrategy
-    ),
-    SpyVwapTrendContinuationLongShortBaseStrategy.name: (
-        SpyVwapTrendContinuationLongShortBaseStrategy
-    ),
-    SpyVwapTrendContinuationDailyTrendFilterStrategy.name: (
-        SpyVwapTrendContinuationDailyTrendFilterStrategy
-    ),
-    SpyVwapTrendContinuationOpeningDriveFilterStrategy.name: (
-        SpyVwapTrendContinuationOpeningDriveFilterStrategy
-    ),
-    SpyVwapTrendContinuationLooseRvolFilterStrategy.name: (
-        SpyVwapTrendContinuationLooseRvolFilterStrategy
-    ),
-    SpyVwapTrendContinuationActiveRvolFilterStrategy.name: (
-        SpyVwapTrendContinuationActiveRvolFilterStrategy
-    ),
-    SpyVwapTrendContinuationNormalToActiveRvolFilterStrategy.name: (
-        SpyVwapTrendContinuationNormalToActiveRvolFilterStrategy
-    ),
-    SpyVwapTrendContinuationAtrDistanceFilterStrategy.name: (
-        SpyVwapTrendContinuationAtrDistanceFilterStrategy
-    ),
-    SpyVwapTrendContinuationOpeningRangeConfluenceLooseFilterStrategy.name: (
-        SpyVwapTrendContinuationOpeningRangeConfluenceLooseFilterStrategy
-    ),
-    SpyVwapTrendContinuationOpeningRangeConfluenceFilterStrategy.name: (
-        SpyVwapTrendContinuationOpeningRangeConfluenceFilterStrategy
-    ),
-    SpyVwapTrendContinuationOpeningRangeConfluenceStrictFilterStrategy.name: (
-        SpyVwapTrendContinuationOpeningRangeConfluenceStrictFilterStrategy
-    ),
-    SpyVwapTrendContinuationInitialStopStrategy.name: (SpyVwapTrendContinuationInitialStopStrategy),
-    SpyVwapTrendContinuationOneRTargetStrategy.name: (SpyVwapTrendContinuationOneRTargetStrategy),
-    SpyVwapTrendContinuationOneAndHalfRTargetStrategy.name: (
-        SpyVwapTrendContinuationOneAndHalfRTargetStrategy
-    ),
-    SpyVwapTrendContinuationTwoRTargetStrategy.name: (SpyVwapTrendContinuationTwoRTargetStrategy),
-    SpyVwapTrendContinuationBasicSignalQualityFilterStrategy.name: (
-        SpyVwapTrendContinuationBasicSignalQualityFilterStrategy
-    ),
-    SpyVwapTrendContinuationStrongSignalQualityFilterStrategy.name: (
-        SpyVwapTrendContinuationStrongSignalQualityFilterStrategy
-    ),
-    SpyVwapTrendContinuationSignalBreakEntryStrategy.name: (
-        SpyVwapTrendContinuationSignalBreakEntryStrategy
-    ),
-    SpyVwapTrendContinuationSignalQualityBreakEntryStrategy.name: (
-        SpyVwapTrendContinuationSignalQualityBreakEntryStrategy
-    ),
-    SpyVwapTrendContinuationTimeStopStrategy.name: (SpyVwapTrendContinuationTimeStopStrategy),
-    SpyVwapTrendContinuationTimeStopThreeBarStrategy.name: (
-        SpyVwapTrendContinuationTimeStopThreeBarStrategy
-    ),
-    SpyVwapTrendContinuationTimeStopSixBarStrategy.name: (
-        SpyVwapTrendContinuationTimeStopSixBarStrategy
-    ),
-    SpyVwapTrendContinuationOneRTargetTimeStopStrategy.name: (
-        SpyVwapTrendContinuationOneRTargetTimeStopStrategy
-    ),
 }
 
 

@@ -12,26 +12,31 @@ Decision cost model: 1 bp one-way slippage + `$0.005/share`, no minimum commissi
 
 The long/short VWAP trend-continuation family is rejected for now. The clean baseline is negative after costs, and most filters improved the result only by removing trades or reducing damage. None created a robust trend-continuation edge.
 
-The only candidate worth carrying forward is the separate VWAP range-reversion playbook, specifically `spy-vwap-range-reversion-1-5atr-band`.
+Update after stop validation: the earlier `spy-vwap-range-reversion-1-5atr-band` result was invalidated by a stop-placement bug. See `docs/research/spy-vwap-range-reversion-stop-validation.md`.
 
-This is not approved for paper or live trading yet because the expanded-history validation item is blocked. Local data covers roughly one year only, while the plan requires at least five years before any acceptance decision.
+With the corrected stop logic, neither checked range-reversion variant remains viable after the base 1 bp + `$0.005/share` cost model. This is not approved for paper or live trading.
 
-## Best Candidate
+## Validation Outcome
 
 | Candidate | Trades | Long | Short | Costed PnL | PF | Exp/Trade | Max DD | Worst 6mo | Top Trade % | Top 5 Abs % | Decision |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| `spy-vwap-range-reversion-1-5atr-band` | 111 | 50 | 61 | `$24.8321` | `10.8307` | `$0.2237` | `-$0.2858` | `$1.2210` | `9.72%` | `35.47%` | Keep for expanded validation |
+| `spy-vwap-range-reversion-base` | 154 | 72 | 82 | `-$24.8627` | `0.6701` | `-$0.1614` | `-$24.8876` | `-$16.9455` | `invalidated pre-fix` | `invalidated pre-fix` | Reject |
+| `spy-vwap-range-reversion-1-5atr-band` | 91 | 42 | 49 | `-$9.5115` | `0.7920` | `-$0.1045` | `-$12.2999` | `-$11.4066` | `invalidated pre-fix` | `invalidated pre-fix` | Reject |
 
 Cost-stress result:
 
 | Scenario | Result |
 |---|---|
-| Gross | `$40.9584` |
-| 1 bp + `$0.005/share`, no minimum | `$24.8321`, PF `10.8307` |
-| 2 bps slippage-only stress | `$10.9258`, PF `2.2557` |
-| 3 bps slippage-only stress | `-$4.0905`, PF `0.7742` |
-| IBKR Canada fixed 1 bp approximation, quantity 1 | `-$196.0579` |
-| IBKR Canada tiered 1 bp approximation, quantity 1 | `-$51.7579` |
+| Range-reversion base, 1 bp + `$0.005/share`, no minimum | `-$24.8627`, PF `0.6701` |
+| Range-reversion base, 2 bps slippage-only stress | `-$45.9548`, PF `0.4613` |
+| Range-reversion base, 3 bps slippage-only stress | `-$72.8240`, PF `0.2821` |
+| Range-reversion base, IBKR Canada fixed approximation | `-$331.3227`, PF `0.0085` |
+| Range-reversion base, IBKR Canada tiered approximation | `-$131.1227`, PF `0.1304` |
+| Range-reversion 1.5 ATR, 1 bp + `$0.005/share`, no minimum | `-$9.5115`, PF `0.7920` |
+| Range-reversion 1.5 ATR, 2 bps slippage-only stress | `-$20.7669`, PF `0.6065` |
+| Range-reversion 1.5 ATR, 3 bps slippage-only stress | `-$42.0164`, PF `0.3663` |
+| Range-reversion 1.5 ATR, IBKR Canada fixed approximation | `-$190.6015`, PF `0.0146` |
+| Range-reversion 1.5 ATR, IBKR Canada tiered approximation | `-$72.3015`, PF `0.2080` |
 
 ## Filter Comparison
 
@@ -48,11 +53,11 @@ Cost-stress result:
 | 008 | R-based exits | Add initial stop and R targets at 1.0R, 1.5R, and 2.0R | 108 | 53 | 55 | `-$14.1312` | `0.6849` | `-$0.1308` | `-$14.7552` | Reject | 1.0R target reduces damage but remains materially negative. |
 | 009 | Time stop | Exit stalled trades after broad bars-held / R-progress rules | 108 | 53 | 55 | `-$14.7227` | `0.6316` | `-$0.1363` | `-$15.7425` | Reject | Reduces damage in some combinations but does not create an edge. |
 | 010 | Regime reporting | Add entry-time and full-session diagnostic regime labels | n/a | n/a | n/a | n/a | n/a | n/a | n/a | Diagnostic-only | Shows bullish trend-continuation candidates are positive, while bearish trend-continuation candidates are heavily negative. |
-| 011 | Range reversion 1.0 ATR band | Separate VWAP mean-reversion playbook with 1.0 ATR bands | 169 | n/a | n/a | `$0.8790` | `1.0300` | `$0.0052` | `-$6.6481` | Diagnostic-only | Slightly positive but too thin after costs to select. |
-| 011 | Range reversion 1.5 ATR band | Separate VWAP mean-reversion playbook with 1.5 ATR bands | 111 | 50 | 61 | `$24.8321` | `10.8307` | `$0.2237` | `-$0.2858` | Keep for validation | First materially positive candidate with acceptable one-year trade count and low concentration. |
+| 011 | Range reversion 1.0 ATR band | Separate VWAP mean-reversion playbook with 1.0 ATR bands | 154 | 72 | 82 | `-$24.8627` | `0.6701` | `-$0.1614` | `-$24.8876` | Reject | After stop-fix rerun, the corrected result is negative after costs and fails stress checks. |
+| 011 | Range reversion 1.5 ATR band | Separate VWAP mean-reversion playbook with 1.5 ATR bands | 91 | 42 | 49 | `-$9.5115` | `0.7920` | `-$0.1045` | `-$12.2999` | Reject | The prior positive result was invalidated by a stop-placement bug; the corrected rerun is negative after costs and fails 2 bps stress. |
 | 012 | Expanded validation | Rerun candidates over at least five years with yearly and OOS splits | n/a | n/a | n/a | n/a | n/a | n/a | n/a | Blocked | Local cache only covers 2025-06-30 through 2026-06-26; Alpaca credentials were unavailable. |
-| 013 | Cost stress | Apply gross, 1 bp, 2 bps, 3 bps, and IBKR-style cost scenarios | n/a | n/a | n/a | n/a | n/a | n/a | n/a | Diagnostic gate | Range-reversion 1.5 ATR passes 2 bps no-minimum stress but fails 3 bps and quantity-1 IBKR Canada minimum approximations. |
-| 014 | Final decision | Stop the cycle and decide next action | n/a | n/a | n/a | n/a | n/a | n/a | n/a | Pause and validate | Do not add more filters until expanded-history validation is available. |
+| 013 | Cost stress | Apply gross, 1 bp, 2 bps, 3 bps, and IBKR-style cost scenarios | n/a | n/a | n/a | n/a | n/a | n/a | n/a | Reject gate | Both corrected range-reversion variants fail the 1 bp base-cost test, fail 2 bps stress, fail 3 bps stress, and fail quantity-1 IBKR Canada approximations. |
+| 014 | Final decision | Stop the cycle and decide next action | n/a | n/a | n/a | n/a | n/a | n/a | n/a | Stop and pivot | Reject the current SPY VWAP strategy family and do not add more filters unless a new thesis is defined. |
 
 ## Main Findings
 
@@ -67,45 +72,43 @@ Cost-stress result:
    - Entry-time regime labels show bullish trend candidates are positive while bearish trend candidates are strongly negative.
    - VWAP/opening-range confluence has a positive narrow pocket, but the sample is too small.
 
-3. Range reversion deserves the next validation pass.
-   - The 1.5 ATR range-reversion band has 111 one-year trades.
-   - Both long and short sides are positive.
-   - Concentration is acceptable under the no-minimum comparison model.
-   - The result still needs expanded-history and execution-assumption validation.
+3. Range reversion no longer qualifies as the next validation pass.
+   - The prior `1.5 ATR` headline result was invalidated by a stop-placement bug.
+   - With corrected stop logic, both checked range-reversion variants are negative after 1 bp + commission costs.
+   - The fixed `1.5 ATR` variant also fails the 2 bps stress gate.
 
 4. Cost assumptions matter.
-   - The best candidate survives the plan's 2 bps no-minimum stress gate.
-   - It fails 3 bps slippage.
-   - It also fails small-account IBKR Canada quantity-1 minimum-commission approximations.
-   - Any next pass should test realistic sizing and commission assumptions alongside the normalized quantity-1 comparison.
+   - Neither corrected range-reversion variant survives the base cost model.
+   - Both degrade further under 2 bps and 3 bps slippage.
+   - Both also fail small-account IBKR Canada quantity-1 minimum-commission approximations.
 
 ## Acceptance Criteria Check
 
 | Criterion | Status | Notes |
 |---|---|---|
 | Tested on at least 5 years of data | Fail / blocked | Local data is roughly one year only. |
-| Average trades/year >= 100 | Pass for candidate | Range-reversion 1.5 ATR has 111 trades in the available year. |
+| Average trades/year >= 100 | Fail for corrected lead | Corrected 1.5 ATR variant has 91 trades; corrected base has 154 trades but is negative after costs. |
 | Total trades >= 500 preferred | Fail / blocked | Requires expanded history. |
-| Positive costed expectancy | Pass for candidate | `$0.2237/trade` under no-minimum comparison costs. |
-| Base-cost PF >= 1.10 | Pass for candidate | PF `10.8307`. |
-| 2 bp slippage stress PF >= 1.05 | Pass for candidate | PF `2.2557` in the 2 bps no-minimum stress. |
-| No single trade > 30% of total PnL | Pass for candidate | Top trade is `9.72%`. |
-| Top 5 absolute trades <= 100% of total PnL | Pass for candidate | Top 5 absolute trades are `35.47%`. |
-| No catastrophic rolling 6-month window | Pass in available year | Worst 6mo is positive for the selected candidate. |
-| Long and short performance understood separately | Pass for available year | Long side `$6.6051`; short side `$18.2270`. |
+| Positive costed expectancy | Fail | Corrected range-reversion base `-$0.1614/trade`; corrected 1.5 ATR `-$0.1045/trade`. |
+| Base-cost PF >= 1.10 | Fail | Corrected range-reversion base PF `0.6701`; corrected 1.5 ATR PF `0.7920`. |
+| 2 bp slippage stress PF >= 1.05 | Fail | Corrected range-reversion base PF `0.4613`; corrected 1.5 ATR PF `0.6065`. |
+| No single trade > 30% of total PnL | Not meaningful for rejected result | Pre-fix concentration figures were invalidated by the stop-placement bug. |
+| Top 5 absolute trades <= 100% of total PnL | Not meaningful for rejected result | Pre-fix concentration figures were invalidated by the stop-placement bug. |
+| No catastrophic rolling 6-month window | Fail | Corrected range-reversion base and corrected 1.5 ATR both have strongly negative worst 6-month windows. |
+| Long and short performance understood separately | Pass for available year | Corrected 1.5 ATR long `-$7.9674`; short `-$1.5441`. |
 | No future-looking labels used for entry | Pass | Full-session labels are diagnostic-only. |
 | Works out-of-sample without retuning | Unknown | Blocked until expanded data exists. |
 
 ## Next Validation Work
 
 1. Expand SPY 5-minute regular-session data to at least five years.
-2. Rerun `spy-vwap-range-reversion-1-5atr-band` without retuning.
-3. Produce year-by-year, in-sample, out-of-sample, and rolling-window summaries.
-4. Recheck cost stress under no-minimum and realistic IBKR Canada sizing assumptions.
-5. Review same-bar target/stop fill assumptions before any paper-trading decision.
+2. If range reversion is revisited later, start only from the corrected stop logic.
+3. Produce new hypotheses instead of trusting the invalidated pre-fix winner.
+4. Recheck cost stress under no-minimum and realistic IBKR Canada sizing assumptions for any future candidate.
+5. Keep the stop-validation note linked in future research writeups so the invalidated result does not get reused.
 
 ## Final Recommendation
 
 Pause trend-continuation filter development.
 
-Validate `spy-vwap-range-reversion-1-5atr-band` on expanded history before adding more filters or considering paper trading.
+Reject the current range-reversion candidates. The prior `spy-vwap-range-reversion-1-5atr-band` result was invalidated by a stop-placement bug, and the corrected rerun is negative after 1 bp costs and fails 2 bps stress.

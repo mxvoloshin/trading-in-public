@@ -1839,9 +1839,61 @@ class SpyVwapRangeReversionStrategy(SpyVwapTrendContinuationLongShortBaseStrateg
     max_opening_range_pct: Decimal = Decimal("0.0120")
     max_vwap_slope_atr_multiple: Decimal = Decimal("0.10")
     min_vwap_crosses: int = 2
-    stop_atr_multiple: Decimal = Decimal("1.50")
+    stop_atr_multiple: Decimal = Decimal("1.0")
     _previous_session_high: Decimal | None = field(default=None, init=False, repr=False)
     _previous_session_low: Decimal | None = field(default=None, init=False, repr=False)
+
+    def decide(
+        self,
+        *,
+        bar: Bar,
+        context: StrategyDecisionContext,
+    ) -> StrategyDecision:
+        """Evaluate one bar while deriving range-reversion risk from the filled entry.
+
+        The runner fills entry intents on the next bar open, so this variant
+        re-validates its stop against the actual simulated fill price before
+        applying intrabar target/stop handling.
+        """
+        state = self._state_for_bar(bar)
+        self._update_vwap(state, bar)
+        action = DecisionAction.HOLD
+        reason = "waiting_for_setup"
+
+        if state.bars_seen == 1:
+            state.opening_range_high = Decimal(str(bar.high))
+            state.opening_range_low = Decimal(str(bar.low))
+            reason = "opening_range_seeded"
+        elif context.position_quantity > 0:
+            invalid_reason = self._ensure_range_reversion_initial_risk(
+                state=state,
+                entry_price=context.average_entry_price,
+                side="long",
+            )
+            if invalid_reason is not None:
+                action, reason = DecisionAction.EXIT_LONG, invalid_reason
+            else:
+                action, reason = self._open_long_decision(state=state, bar=bar)
+        elif context.position_quantity < 0:
+            invalid_reason = self._ensure_range_reversion_initial_risk(
+                state=state,
+                entry_price=context.average_entry_price,
+                side="short",
+            )
+            if invalid_reason is not None:
+                action, reason = DecisionAction.EXIT_SHORT, invalid_reason
+            else:
+                action, reason = self._open_short_decision(state=state, bar=bar)
+        else:
+            action, reason = self._flat_position_decision(state=state, bar=bar)
+
+        state.previous_bar = bar
+        return self._decision(
+            action=action,
+            bar=bar,
+            context=context,
+            reason=reason,
+        )
 
     def _state_for_bar(self, bar: Bar) -> _SessionState:
         """Carry prior-session range into the next session without lookahead."""
@@ -1872,16 +1924,48 @@ class SpyVwapRangeReversionStrategy(SpyVwapTrendContinuationLongShortBaseStrateg
         previous_close = Decimal(str(_required_bar(state.previous_bar).close))
         if current_close <= current_vwap - self.vwap_band_atr_multiple * atr_5m:
             if current_close > previous_close:
+                target, stop = self._range_reversion_levels(
+                    entry_price=current_close,
+                    current_vwap=current_vwap,
+                    atr_5m=atr_5m,
+                    side="long",
+                )
+                invalid_reason = self._invalid_range_reversion_stop_reason(
+                    entry_price=current_close,
+                    stop=stop,
+                    side="long",
+                )
+                if invalid_reason is not None:
+                    return DecisionAction.HOLD, invalid_reason
                 state.trades_entered += 1
-                state.initial_target = current_vwap
-                state.initial_stop = current_vwap - self.stop_atr_multiple * atr_5m
+                state.signal_bar_vwap = current_vwap
+                state.signal_bar_atr_5m = atr_5m
+                state.initial_target = target
+                state.initial_stop = stop
+                state.initial_risk = None
                 return DecisionAction.ENTER_LONG, "range_reversion_long_turn_up"
             return DecisionAction.HOLD, "range_reversion_long_turn_not_confirmed"
         if current_close >= current_vwap + self.vwap_band_atr_multiple * atr_5m:
             if current_close < previous_close:
+                target, stop = self._range_reversion_levels(
+                    entry_price=current_close,
+                    current_vwap=current_vwap,
+                    atr_5m=atr_5m,
+                    side="short",
+                )
+                invalid_reason = self._invalid_range_reversion_stop_reason(
+                    entry_price=current_close,
+                    stop=stop,
+                    side="short",
+                )
+                if invalid_reason is not None:
+                    return DecisionAction.HOLD, invalid_reason
                 state.trades_entered += 1
-                state.initial_target = current_vwap
-                state.initial_stop = current_vwap + self.stop_atr_multiple * atr_5m
+                state.signal_bar_vwap = current_vwap
+                state.signal_bar_atr_5m = atr_5m
+                state.initial_target = target
+                state.initial_stop = stop
+                state.initial_risk = None
                 return DecisionAction.ENTER_SHORT, "range_reversion_short_turn_down"
             return DecisionAction.HOLD, "range_reversion_short_turn_not_confirmed"
         return DecisionAction.HOLD, "range_reversion_vwap_band_not_reached"
@@ -1962,6 +2046,67 @@ class SpyVwapRangeReversionStrategy(SpyVwapTrendContinuationLongShortBaseStrateg
             return "range_reversion_vwap_slope_too_steep"
         if self._vwap_cross_count(previous_bars) < self.min_vwap_crosses:
             return "range_reversion_not_enough_vwap_crosses"
+        return None
+
+    def _ensure_range_reversion_initial_risk(
+        self,
+        *,
+        state: _SessionState,
+        entry_price: Decimal,
+        side: str,
+    ) -> str | None:
+        """Bind the stop to the actual filled entry price exactly once."""
+        if state.initial_risk is not None:
+            return None
+        signal_vwap = _required_decimal(state.signal_bar_vwap, "signal_bar_vwap")
+        signal_atr = _required_decimal(state.signal_bar_atr_5m, "signal_bar_atr_5m")
+        target, stop = self._range_reversion_levels(
+            entry_price=entry_price,
+            current_vwap=signal_vwap,
+            atr_5m=signal_atr,
+            side=side,
+        )
+        invalid_reason = self._invalid_range_reversion_stop_reason(
+            entry_price=entry_price,
+            stop=stop,
+            side=side,
+        )
+        if invalid_reason is not None:
+            return invalid_reason
+        state.initial_target = target
+        state.initial_stop = stop
+        if side == "long":
+            state.initial_risk = entry_price - stop
+        else:
+            state.initial_risk = stop - entry_price
+        return None
+
+    def _range_reversion_levels(
+        self,
+        *,
+        entry_price: Decimal,
+        current_vwap: Decimal,
+        atr_5m: Decimal,
+        side: str,
+    ) -> tuple[Decimal, Decimal]:
+        """Return the mean-reversion target and entry-relative protective stop."""
+        target = current_vwap
+        if side == "long":
+            return target, entry_price - self.stop_atr_multiple * atr_5m
+        return target, entry_price + self.stop_atr_multiple * atr_5m
+
+    def _invalid_range_reversion_stop_reason(
+        self,
+        *,
+        entry_price: Decimal,
+        stop: Decimal,
+        side: str,
+    ) -> str | None:
+        """Return a clear reason when the proposed stop is not protective."""
+        if side == "long" and stop >= entry_price:
+            return "invalid_long_stop_not_below_entry"
+        if side == "short" and stop <= entry_price:
+            return "invalid_short_stop_not_above_entry"
         return None
 
     def _session_bars_from_state(self, state: _SessionState) -> tuple[Bar, ...]:

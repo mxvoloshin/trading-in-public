@@ -461,6 +461,12 @@ edge:
 | `ibkr_ca_fixed_1bps` | `-$886.52867929` | `-$2.0194275155` | `0.1334` | `$937.62757929` | `18.35x` |
 | `ibkr_ca_tiered_1bps` | `-$315.82867929` | `-$0.7194275155` | `0.4264` | `$366.92757929` | `7.18x` |
 
+Archived note:
+
+- The SPY VWAP strategy family discussed below is retained as research history only.
+- Those VWAP variants are intentionally not registered in the active CLI strategy registry on this branch.
+- Historical commands and results remain useful as archived notes, but they are not the current strategy surface for new testing.
+
 ### Trend-Day VWAP Reclaim Candidate
 
 The first narrowed trend-continuation candidate is available as

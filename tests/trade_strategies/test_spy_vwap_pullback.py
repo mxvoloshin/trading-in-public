@@ -3,7 +3,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
+import pytest
 from trade_core import (
     DecisionAction,
     InstrumentRef,
@@ -20,6 +22,7 @@ from trade_strategies import (
     OpeningDriveQualityVwapReclaimStrategy,
     RvolBucketVwapReclaimStrategy,
     SpyVwapPullbackStrategy,
+    SpyVwapRangeReversionOneAndHalfAtrBandStrategy,
     SpyVwapTrendContinuationActiveRvolFilterStrategy,
     SpyVwapTrendContinuationAtrDistanceFilterStrategy,
     SpyVwapTrendContinuationBasicSignalQualityFilterStrategy,
@@ -1116,184 +1119,147 @@ def test_spy_vwap_pullback_respects_max_daily_trades() -> None:
     assert "entry_context_not_ready" in decision.reason
 
 
-def test_strategy_registry_returns_spy_vwap_pullback() -> None:
-    strategy = get_strategy("spy-vwap-pullback")
+def test_active_strategy_registry_returns_close_momentum() -> None:
+    strategy = get_strategy("close-momentum")
 
-    assert strategy.name == "spy-vwap-pullback"
-
-
-def test_strategy_registry_returns_symmetric_spy_vwap_pullback() -> None:
-    strategy = get_strategy("spy-vwap-pullback-long-short")
-
-    assert strategy.name == "spy-vwap-pullback-long-short"
+    assert strategy.name == "close-momentum"
 
 
-def test_strategy_registry_returns_trend_day_vwap_reclaim() -> None:
-    strategy = get_strategy("trend-day-vwap-reclaim")
-
-    assert strategy.name == "trend-day-vwap-reclaim"
-
-
-def test_strategy_registry_returns_entry_filtered_trend_day_vwap_reclaim() -> None:
-    strategy = get_strategy("trend-day-vwap-reclaim-entry-filter")
-
-    assert strategy.name == "trend-day-vwap-reclaim-entry-filter"
-
-
-def test_strategy_registry_returns_gap_and_go_vwap_pullback() -> None:
-    strategy = get_strategy("gap-and-go-vwap-pullback")
-
-    assert strategy.name == "gap-and-go-vwap-pullback"
-
-
-def test_strategy_registry_returns_daily_context_vwap_reclaim() -> None:
-    strategy = get_strategy("trend-day-vwap-reclaim-v2-daily-context")
-
-    assert strategy.name == "trend-day-vwap-reclaim-v2-daily-context"
-
-
-def test_strategy_registry_returns_opening_drive_quality_vwap_reclaim() -> None:
-    strategy = get_strategy("trend-day-vwap-reclaim-v3-opening-drive")
-
-    assert strategy.name == "trend-day-vwap-reclaim-v3-opening-drive"
-
-
-def test_strategy_registry_returns_rvol_bucket_vwap_reclaim() -> None:
-    strategy = get_strategy("trend-day-vwap-reclaim-v4-rvol-buckets")
-
-    assert strategy.name == "trend-day-vwap-reclaim-v4-rvol-buckets"
-
-
-def test_strategy_registry_returns_dynamic_vwap_distance_reclaim() -> None:
-    strategy = get_strategy("trend-day-vwap-reclaim-v5-dynamic-vwap-distance")
-
-    assert strategy.name == "trend-day-vwap-reclaim-v5-dynamic-vwap-distance"
-
-
-def test_strategy_registry_returns_long_short_trend_continuation_base() -> None:
-    strategy = get_strategy("spy-vwap-trend-continuation-long-short-base")
-
-    assert strategy.name == "spy-vwap-trend-continuation-long-short-base"
-
-
-def test_strategy_registry_returns_long_short_daily_trend_filter() -> None:
-    strategy = get_strategy("spy-vwap-trend-continuation-long-short-daily-trend-filter")
-
-    assert strategy.name == "spy-vwap-trend-continuation-long-short-daily-trend-filter"
-
-
-def test_strategy_registry_returns_long_short_opening_drive_filter() -> None:
-    strategy = get_strategy("spy-vwap-trend-continuation-long-short-opening-drive-filter")
-
-    assert strategy.name == "spy-vwap-trend-continuation-long-short-opening-drive-filter"
-
-
-def test_strategy_registry_returns_long_short_rvol_filters() -> None:
-    assert (
-        get_strategy("spy-vwap-trend-continuation-long-short-rvol-loose-filter").name
-        == "spy-vwap-trend-continuation-long-short-rvol-loose-filter"
-    )
-    assert (
-        get_strategy("spy-vwap-trend-continuation-long-short-rvol-active-filter").name
-        == "spy-vwap-trend-continuation-long-short-rvol-active-filter"
-    )
-    assert (
-        get_strategy("spy-vwap-trend-continuation-long-short-rvol-normal-active-filter").name
-        == "spy-vwap-trend-continuation-long-short-rvol-normal-active-filter"
+def test_archived_vwap_family_is_not_in_active_strategy_registry() -> None:
+    archived_names = (
+        "spy-vwap-pullback",
+        "spy-vwap-pullback-long-short",
+        "trend-day-vwap-reclaim",
+        "trend-day-vwap-reclaim-entry-filter",
+        "gap-and-go-vwap-pullback",
+        "trend-day-vwap-reclaim-v2-daily-context",
+        "trend-day-vwap-reclaim-v3-opening-drive",
+        "trend-day-vwap-reclaim-v4-rvol-buckets",
+        "trend-day-vwap-reclaim-v5-dynamic-vwap-distance",
+        "spy-vwap-trend-continuation-long-short-base",
+        "spy-vwap-trend-continuation-long-short-daily-trend-filter",
+        "spy-vwap-trend-continuation-long-short-opening-drive-filter",
+        "spy-vwap-trend-continuation-long-short-rvol-loose-filter",
+        "spy-vwap-trend-continuation-long-short-rvol-active-filter",
+        "spy-vwap-trend-continuation-long-short-rvol-normal-active-filter",
+        "spy-vwap-trend-continuation-long-short-atr-distance-filter",
+        "spy-vwap-trend-continuation-long-short-signal-quality-basic-filter",
+        "spy-vwap-trend-continuation-long-short-signal-quality-strong-filter",
+        "spy-vwap-trend-continuation-long-short-vwap-or-confluence-1-00-filter",
+        "spy-vwap-trend-continuation-long-short-vwap-or-confluence-0-50-filter",
+        "spy-vwap-trend-continuation-long-short-vwap-or-confluence-0-25-filter",
+        "spy-vwap-trend-continuation-long-short-initial-stop",
+        "spy-vwap-trend-continuation-long-short-1-0r-target",
+        "spy-vwap-trend-continuation-long-short-1-5r-target",
+        "spy-vwap-trend-continuation-long-short-2-0r-target",
+        "spy-vwap-trend-continuation-long-short-signal-break-entry",
+        "spy-vwap-trend-continuation-long-short-signal-quality-break-entry",
+        "spy-vwap-trend-continuation-long-short-time-stop-4-030r",
+        "spy-vwap-trend-continuation-long-short-time-stop-3-030r",
+        "spy-vwap-trend-continuation-long-short-time-stop-6-030r",
+        "spy-vwap-trend-continuation-long-short-1-0r-target-time-stop",
+        "spy-vwap-range-reversion-base",
+        "spy-vwap-range-reversion-1-0atr-band",
+        "spy-vwap-range-reversion-1-5atr-band",
     )
 
-
-def test_strategy_registry_returns_long_short_atr_distance_filter() -> None:
-    strategy = get_strategy("spy-vwap-trend-continuation-long-short-atr-distance-filter")
-
-    assert strategy.name == "spy-vwap-trend-continuation-long-short-atr-distance-filter"
+    for strategy_name in archived_names:
+        with pytest.raises(ValueError, match="unknown strategy"):
+            get_strategy(strategy_name)
 
 
-def test_strategy_registry_returns_long_short_signal_quality_filters() -> None:
-    assert (
-        get_strategy("spy-vwap-trend-continuation-long-short-signal-quality-basic-filter").name
-        == "spy-vwap-trend-continuation-long-short-signal-quality-basic-filter"
-    )
-    assert (
-        get_strategy("spy-vwap-trend-continuation-long-short-signal-quality-strong-filter").name
-        == "spy-vwap-trend-continuation-long-short-signal-quality-strong-filter"
+def test_range_reversion_long_entry_sets_stop_below_entry() -> None:
+    strategy = _ExposedRangeReversionStrategy()
+    state, current_bar = _seed_range_reversion_candidate_state(
+        strategy,
+        current_close=Decimal("98.5"),
+        previous_close=Decimal("98.4"),
     )
 
+    action, reason = strategy.flat_position_decision(state=state, bar=current_bar)
 
-def test_strategy_registry_returns_long_short_vwap_opening_range_confluence_filters() -> None:
-    assert (
-        get_strategy("spy-vwap-trend-continuation-long-short-vwap-or-confluence-1-00-filter").name
-        == "spy-vwap-trend-continuation-long-short-vwap-or-confluence-1-00-filter"
-    )
-    assert (
-        get_strategy("spy-vwap-trend-continuation-long-short-vwap-or-confluence-0-50-filter").name
-        == "spy-vwap-trend-continuation-long-short-vwap-or-confluence-0-50-filter"
-    )
-    assert (
-        get_strategy("spy-vwap-trend-continuation-long-short-vwap-or-confluence-0-25-filter").name
-        == "spy-vwap-trend-continuation-long-short-vwap-or-confluence-0-25-filter"
-    )
+    assert action == DecisionAction.ENTER_LONG
+    assert reason == "range_reversion_long_turn_up"
+    assert state.initial_stop is not None
+    assert state.initial_stop < Decimal(str(current_bar.close))
 
 
-def test_strategy_registry_returns_long_short_r_exit_filters() -> None:
-    assert (
-        get_strategy("spy-vwap-trend-continuation-long-short-initial-stop").name
-        == "spy-vwap-trend-continuation-long-short-initial-stop"
-    )
-    assert (
-        get_strategy("spy-vwap-trend-continuation-long-short-1-0r-target").name
-        == "spy-vwap-trend-continuation-long-short-1-0r-target"
-    )
-    assert (
-        get_strategy("spy-vwap-trend-continuation-long-short-1-5r-target").name
-        == "spy-vwap-trend-continuation-long-short-1-5r-target"
-    )
-    assert (
-        get_strategy("spy-vwap-trend-continuation-long-short-2-0r-target").name
-        == "spy-vwap-trend-continuation-long-short-2-0r-target"
+def test_range_reversion_short_entry_sets_stop_above_entry() -> None:
+    strategy = _ExposedRangeReversionStrategy()
+    state, current_bar = _seed_range_reversion_candidate_state(
+        strategy,
+        current_close=Decimal("101.5"),
+        previous_close=Decimal("101.6"),
     )
 
+    action, reason = strategy.flat_position_decision(state=state, bar=current_bar)
 
-def test_strategy_registry_returns_long_short_signal_break_entry_filters() -> None:
-    assert (
-        get_strategy("spy-vwap-trend-continuation-long-short-signal-break-entry").name
-        == "spy-vwap-trend-continuation-long-short-signal-break-entry"
-    )
-    assert (
-        get_strategy("spy-vwap-trend-continuation-long-short-signal-quality-break-entry").name
-        == "spy-vwap-trend-continuation-long-short-signal-quality-break-entry"
-    )
+    assert action == DecisionAction.ENTER_SHORT
+    assert reason == "range_reversion_short_turn_down"
+    assert state.initial_stop is not None
+    assert state.initial_stop > Decimal(str(current_bar.close))
 
 
-def test_strategy_registry_returns_long_short_time_stop_filters() -> None:
-    assert (
-        get_strategy("spy-vwap-trend-continuation-long-short-time-stop-4-030r").name
-        == "spy-vwap-trend-continuation-long-short-time-stop-4-030r"
-    )
-    assert (
-        get_strategy("spy-vwap-trend-continuation-long-short-time-stop-3-030r").name
-        == "spy-vwap-trend-continuation-long-short-time-stop-3-030r"
-    )
-    assert (
-        get_strategy("spy-vwap-trend-continuation-long-short-time-stop-6-030r").name
-        == "spy-vwap-trend-continuation-long-short-time-stop-6-030r"
-    )
-    assert (
-        get_strategy("spy-vwap-trend-continuation-long-short-1-0r-target-time-stop").name
-        == "spy-vwap-trend-continuation-long-short-1-0r-target-time-stop"
+def test_range_reversion_long_rejects_invalid_stop_placement() -> None:
+    strategy = _ExposedRangeReversionStrategy(stop_atr_multiple=Decimal("-0.1"))
+    state, current_bar = _seed_range_reversion_candidate_state(
+        strategy,
+        current_close=Decimal("98.5"),
+        previous_close=Decimal("98.4"),
     )
 
+    action, reason = strategy.flat_position_decision(state=state, bar=current_bar)
 
-def test_strategy_registry_returns_range_reversion_strategies() -> None:
-    assert get_strategy("spy-vwap-range-reversion-base").name == "spy-vwap-range-reversion-base"
-    assert (
-        get_strategy("spy-vwap-range-reversion-1-0atr-band").name
-        == "spy-vwap-range-reversion-1-0atr-band"
+    assert action == DecisionAction.HOLD
+    assert reason == "invalid_long_stop_not_below_entry"
+
+
+def test_range_reversion_short_rejects_invalid_stop_placement() -> None:
+    strategy = _ExposedRangeReversionStrategy(stop_atr_multiple=Decimal("-0.1"))
+    state, current_bar = _seed_range_reversion_candidate_state(
+        strategy,
+        current_close=Decimal("101.5"),
+        previous_close=Decimal("101.6"),
     )
-    assert (
-        get_strategy("spy-vwap-range-reversion-1-5atr-band").name
-        == "spy-vwap-range-reversion-1-5atr-band"
+
+    action, reason = strategy.flat_position_decision(state=state, bar=current_bar)
+
+    assert action == DecisionAction.HOLD
+    assert reason == "invalid_short_stop_not_above_entry"
+
+
+def test_range_reversion_long_same_bar_stop_beats_target_when_both_hit() -> None:
+    strategy = _ExposedRangeReversionStrategy()
+    state, _current_bar = _seed_range_reversion_candidate_state(
+        strategy,
+        current_close=Decimal("98.5"),
+        previous_close=Decimal("98.4"),
     )
+    state.initial_target = Decimal("100")
+    state.initial_stop = Decimal("98")
+
+    exit_bar = _bar(index=9, open=99.0, high=100.2, low=97.8, close=99.5, day=27)
+    action, reason = strategy.open_long_decision(state=state, bar=exit_bar)
+
+    assert action == DecisionAction.EXIT_LONG
+    assert reason == "range_reversion_stop_exit@98"
+
+
+def test_range_reversion_short_same_bar_stop_beats_target_when_both_hit() -> None:
+    strategy = _ExposedRangeReversionStrategy()
+    state, _current_bar = _seed_range_reversion_candidate_state(
+        strategy,
+        current_close=Decimal("101.5"),
+        previous_close=Decimal("101.6"),
+    )
+    state.initial_target = Decimal("100")
+    state.initial_stop = Decimal("102")
+
+    exit_bar = _bar(index=9, open=101.0, high=102.2, low=99.8, close=100.5, day=27)
+    action, reason = strategy.open_short_decision(state=state, bar=exit_bar)
+
+    assert action == DecisionAction.EXIT_SHORT
+    assert reason == "range_reversion_stop_exit@102"
 
 
 def _decisions_for_bars(
@@ -1421,6 +1387,66 @@ def _seed_completed_daily_closes(
             ),
         )
         _decisions_for_bars(strategy, bars, position_quantity=Decimal("0"))
+
+
+class _ExposedRangeReversionStrategy(SpyVwapRangeReversionOneAndHalfAtrBandStrategy):
+    def state_for_bar(self, bar: Bar) -> Any:
+        return self._state_for_bar(bar)
+
+    def flat_position_decision(self, *, state: Any, bar: Bar) -> tuple[DecisionAction, str]:
+        return self._flat_position_decision(state=state, bar=bar)
+
+    def open_long_decision(self, *, state: Any, bar: Bar) -> tuple[DecisionAction, str]:
+        return self._open_long_decision(state=state, bar=bar)
+
+    def open_short_decision(self, *, state: Any, bar: Bar) -> tuple[DecisionAction, str]:
+        return self._open_short_decision(state=state, bar=bar)
+
+    def set_prior_session_range(self, *, high: Decimal, low: Decimal) -> None:
+        self._previous_session_high = high
+        self._previous_session_low = low
+
+
+def _seed_range_reversion_candidate_state(
+    strategy: _ExposedRangeReversionStrategy,
+    *,
+    current_close: Decimal,
+    previous_close: Decimal,
+) -> tuple[Any, Bar]:
+    current_bar = _bar(
+        index=8,
+        open=float(current_close),
+        high=float(current_close + Decimal("0.2")),
+        low=float(current_close - Decimal("0.2")),
+        close=float(current_close),
+        day=27,
+    )
+    state = strategy.state_for_bar(current_bar)
+    strategy.set_prior_session_range(high=Decimal("110"), low=Decimal("90"))
+    state.bars_seen = 8
+    state.session_open = Decimal("100")
+    state.current_vwap = Decimal("100")
+    state.previous_vwap = Decimal("100")
+    state.first_30_minute_high = Decimal("100.5")
+    state.first_30_minute_low = Decimal("99.7")
+    state.previous_bar = _bar(
+        index=7,
+        open=float(previous_close),
+        high=float(previous_close + Decimal("0.1")),
+        low=float(previous_close - Decimal("0.1")),
+        close=float(previous_close),
+        day=27,
+    )
+    state.true_ranges = [Decimal("1")] * strategy.atr_period_5m
+    state.range_reversion_bars = (
+        _bar(index=0, open=99.9, high=100.0, low=99.8, close=99.9, day=27),
+        _bar(index=1, open=100.1, high=100.2, low=100.0, close=100.1, day=27),
+        _bar(index=2, open=99.9, high=100.0, low=99.8, close=99.9, day=27),
+        _bar(index=3, open=100.1, high=100.2, low=100.0, close=100.1, day=27),
+        _bar(index=4, open=99.9, high=100.0, low=99.8, close=99.9, day=27),
+        _bar(index=5, open=100.1, high=100.2, low=100.0, close=100.1, day=27),
+    )
+    return state, current_bar
 
 
 def _context(
