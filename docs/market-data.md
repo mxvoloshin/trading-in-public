@@ -1,8 +1,10 @@
 # Market Data
 
-This document explains how to prepare local historical market data for research and future backtests.
+This document explains how to prepare local historical market data for research
+and backtests.
 
-The v1 source is Alpaca historical stock bars for U.S.-listed stocks and ETFs. Real market data is stored only in a gitignored local `.data/` directory.
+The source is Alpaca historical stock bars for U.S.-listed stocks and ETFs.
+Real market data is stored only in a gitignored local `.data/` directory.
 
 ## Credentials
 
@@ -103,4 +105,3 @@ Do not commit:
 - downloaded OHLCV data
 - broker/account identifiers
 - private financial data
-

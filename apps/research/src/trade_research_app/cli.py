@@ -57,7 +57,11 @@ def _build_parser() -> argparse.ArgumentParser:
     backtest_subcommands = backtest.add_subparsers(dest="backtest_command")
 
     run = backtest_subcommands.add_parser("run")
-    run.add_argument("--strategy", default="close-momentum", choices=list_strategy_names())
+    run.add_argument(
+        "--strategy",
+        default="spy-opening-range-breakout-trend-hold-midpoint-stop-max-1",
+        choices=list_strategy_names(),
+    )
     run.add_argument("--symbol", required=True)
     run.add_argument("--timeframe", default="5Min")
     run.add_argument("--start", required=True, help="inclusive market-local date, YYYY-MM-DD")
@@ -73,7 +77,11 @@ def _build_parser() -> argparse.ArgumentParser:
     run.set_defaults(handler=_handle_backtest_run)
 
     cost_stress = backtest_subcommands.add_parser("cost-stress")
-    cost_stress.add_argument("--strategy", default="close-momentum", choices=list_strategy_names())
+    cost_stress.add_argument(
+        "--strategy",
+        default="spy-opening-range-breakout-trend-hold-midpoint-stop-max-1",
+        choices=list_strategy_names(),
+    )
     cost_stress.add_argument("--symbol", required=True)
     cost_stress.add_argument("--timeframe", default="5Min")
     cost_stress.add_argument(

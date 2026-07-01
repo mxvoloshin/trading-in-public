@@ -122,15 +122,7 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
         "exit_reason_breakdown": {"close_below_previous_close": expected_trade_bucket},
         "expectancy_per_day": "-1.0",
         "expectancy_per_trade": "-1.0",
-        "entry_time_regime_breakdown": {"unclear": expected_trade_bucket},
-        "entry_time_regime_side_breakdown": {"long:unclear": expected_trade_bucket},
         "fills": 2,
-        "full_session_diagnostic_regime_breakdown": {
-            "chop_or_mixed_diagnostic": expected_trade_bucket
-        },
-        "full_session_diagnostic_regime_side_breakdown": {
-            "long:chop_or_mixed_diagnostic": expected_trade_bucket
-        },
         "gap_breakdown": {"unknown_gap": expected_trade_bucket},
         "gross_pnl": "-1.0",
         "holding_time_breakdown": {"00-30m": expected_trade_bucket},
@@ -188,10 +180,6 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
         "short_pf": "0",
         "short_pnl": "0",
         "short_trades": 0,
-        "vwap_distance_atr_breakdown": {"unknown_vwap_distance_atr": expected_trade_bucket},
-        "vwap_opening_range_confluence_breakdown": {
-            "unknown_vwap_opening_range_confluence": expected_trade_bucket
-        },
         "rolling_3_month_breakdown": {
             "2026-06-01_2026-08-30": expected_trade_bucket,
         },
@@ -213,7 +201,6 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
         "trades": 1,
         "trade_contribution_breakdown": expected_trade_contribution,
         "time_of_day_breakdown": {"09:30-10:00": expected_trade_bucket},
-        "trend_breakdown": {"chop_or_mixed": expected_trade_bucket},
         "unrealized_pnl": "0",
         "weekday_breakdown": {"4_Friday": expected_trade_bucket},
         "win_rate": "0",
@@ -528,24 +515,9 @@ def test_minimal_backtest_reports_trade_breakdowns(tmp_path: Path) -> None:
         "unknown_opening_drive": expected_trade_bucket
     }
     assert summary.daily_trend_breakdown == {"daily_context_not_ready": expected_trade_bucket}
-    assert summary.trend_breakdown == {"chop_or_mixed": expected_trade_bucket}
     assert summary.relative_volume_breakdown == {"unknown_relative_volume": expected_trade_bucket}
-    assert summary.vwap_distance_atr_breakdown == {
-        "unknown_vwap_distance_atr": expected_trade_bucket
-    }
-    assert summary.vwap_opening_range_confluence_breakdown == {
-        "unknown_vwap_opening_range_confluence": expected_trade_bucket
-    }
     assert summary.signal_bar_close_location_breakdown == {"0.80-1.00": expected_trade_bucket}
     assert summary.signal_bar_body_pct_breakdown == {"0.80-1.00": expected_trade_bucket}
-    assert summary.entry_time_regime_breakdown == {"unclear": expected_trade_bucket}
-    assert summary.entry_time_regime_side_breakdown == {"long:unclear": expected_trade_bucket}
-    assert summary.full_session_diagnostic_regime_breakdown == {
-        "chop_or_mixed_diagnostic": expected_trade_bucket
-    }
-    assert summary.full_session_diagnostic_regime_side_breakdown == {
-        "long:chop_or_mixed_diagnostic": expected_trade_bucket
-    }
 
 
 def test_minimal_backtest_tracks_long_mfe_and_r_diagnostics(tmp_path: Path) -> None:
@@ -757,7 +729,6 @@ def test_session_regime_tags_bucket_gap_opening_range_trend_and_volume() -> None
     assert tags["2026-06-29"].opening_drive_return_bucket == "0% to +0.20%"
     assert tags["2026-06-29"].opening_drive_close_position_bucket == "0.40-0.60"
     assert tags["2026-06-29"].daily_trend_state == "bullish_daily_context"
-    assert tags["2026-06-29"].trend_state == "trend_up"
     assert tags["2026-06-29"].relative_volume_bucket == "event_like"
 
 

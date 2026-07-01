@@ -70,7 +70,10 @@ Must not depend on:
 - one backtesting engine
 - one live execution app
 
-Do not make `trade_core` a fully shared order lifecycle model too early. The current shared-boundary decision is documented in `docs/research/shared-core-boundary.md`: core should share decisions, risk decisions, order intents, and traceability IDs first, while simulated orders/fills and broker orders/executions remain mode-specific until later implementation issues prove the right contracts.
+Do not make `trade_core` a fully shared order lifecycle model too early. Core
+should share decisions, risk decisions, order intents, and traceability IDs
+first, while simulated orders/fills and broker orders/executions remain
+mode-specific until later implementation issues prove the right contracts.
 
 ### `trade_strategies`
 

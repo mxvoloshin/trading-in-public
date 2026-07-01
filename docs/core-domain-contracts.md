@@ -2,7 +2,8 @@
 
 Issue: [#12](https://github.com/mxvoloshin/trading-in-public/issues/12)
 
-The first `trade_core` contracts implement the shared boundary selected by the [shared core boundary decision](research/shared-core-boundary.md).
+The first `trade_core` contracts implement the current shared boundary for
+research and future execution.
 
 They intentionally cover only:
 
@@ -12,6 +13,13 @@ They intentionally cover only:
 - risk decisions
 - broker-neutral order intents
 - traceability IDs
+
+The current boundary rule is:
+
+- share strategy decisions
+- share risk decisions
+- share broker-neutral order intents
+- keep simulated fills and broker execution records mode-specific
 
 They do not model broker orders, order statuses, fills, executions, commissions, positions, portfolio snapshots, PnL, reconciliation records, or analytics reports.
 
