@@ -8,6 +8,11 @@ from trade_strategies.close_momentum import CloseMomentumStrategy
 from trade_strategies.protocols import Strategy
 from trade_strategies.spy_opening_range_breakout import (
     SpyOpeningRangeBreakoutMidpointStopMaxOneStrategy,
+    SpyOrbAtrTrail1_0Strategy,
+    SpyOrbAtrTrail1_5Strategy,
+    SpyOrbAtrTrail2_0Strategy,
+    SpyOrbBreakEvenAfter1RStrategy,
+    SpyOrbStructureTrailStrategy,
 )
 
 StrategyFactory = Callable[[], Strategy]
@@ -17,6 +22,11 @@ _STRATEGIES: dict[str, StrategyFactory] = {
     SpyOpeningRangeBreakoutMidpointStopMaxOneStrategy.name: (
         SpyOpeningRangeBreakoutMidpointStopMaxOneStrategy
     ),
+    SpyOrbBreakEvenAfter1RStrategy.name: SpyOrbBreakEvenAfter1RStrategy,
+    SpyOrbAtrTrail1_0Strategy.name: SpyOrbAtrTrail1_0Strategy,
+    SpyOrbAtrTrail1_5Strategy.name: SpyOrbAtrTrail1_5Strategy,
+    SpyOrbAtrTrail2_0Strategy.name: SpyOrbAtrTrail2_0Strategy,
+    SpyOrbStructureTrailStrategy.name: SpyOrbStructureTrailStrategy,
 }
 
 

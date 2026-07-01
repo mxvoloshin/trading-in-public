@@ -94,8 +94,6 @@ def test_orb_midpoint_strategy_exits_long_at_stop_price() -> None:
     assert "orb_stop_long@" in decision.reason
 
 
-
-
 def test_spy_vwap_pullback_enters_after_pullback_and_trend_resumption() -> None:
     strategy = SpyVwapPullbackStrategy()
     bars = (

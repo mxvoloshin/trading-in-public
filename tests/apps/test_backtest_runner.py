@@ -4,6 +4,7 @@ import json
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 from typing import ClassVar
 
 from pytest import CaptureFixture
@@ -43,38 +44,27 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
     assert summary.realized_pnl == Decimal("-1.0")
     assert summary.unrealized_pnl == Decimal("0")
     assert summary.total_pnl == Decimal("-1.0")
-    expected_trade_bucket = {
-        "average_holding_minutes": "10",
-        "average_loss": "-1.0",
-        "average_post_exit_max_favorable_pnl": "0.0",
-        "average_win": "0",
-        "closed_trades": 1,
-        "expectancy": "-1.0",
-        "losing_trades": 1,
-        "max_post_exit_max_favorable_pnl": "0.0",
-        "median_holding_minutes": "10",
-        "median_post_exit_max_favorable_pnl": "0.0",
-        "profit_factor": "0",
-        "total_pnl": "-1.0",
-        "win_rate": "0",
-        "winning_trades": 0,
-    }
-    expected_empty_trade_bucket = {
-        "average_holding_minutes": "0",
-        "average_loss": "0",
-        "average_post_exit_max_favorable_pnl": "0",
-        "average_win": "0",
-        "closed_trades": 0,
-        "expectancy": "0",
-        "losing_trades": 0,
-        "max_post_exit_max_favorable_pnl": "0",
-        "median_holding_minutes": "0",
-        "median_post_exit_max_favorable_pnl": "0",
-        "profit_factor": "0",
-        "total_pnl": "0",
-        "win_rate": "0",
-        "winning_trades": 0,
-    }
+    expected_trade_bucket = _trade_bucket(
+        total_pnl="-1.0",
+        average_loss="-1.0",
+        average_holding_minutes="10",
+        median_holding_minutes="10",
+        average_post_exit_max_favorable_pnl="0.0",
+        median_post_exit_max_favorable_pnl="0.0",
+        max_post_exit_max_favorable_pnl="0.0",
+        avg_mfe="0.5",
+        median_mfe="0.5",
+        avg_mae="0.5",
+        median_mae="0.5",
+        avg_final_r="-0.009852216748768472906403940887",
+        avg_max_favorable_r="0.004926108374384236453201970443",
+        avg_max_adverse_r="0.004926108374384236453201970443",
+        pct_reached_1r="0",
+        pct_reached_2r="0",
+        pct_reached_3r="0",
+        pct_reached_1r_then_negative="0",
+    )
+    expected_empty_trade_bucket = _empty_trade_bucket()
     expected_trade_contribution = {
         "top_1": {
             "count": 1,
@@ -156,6 +146,20 @@ def test_minimal_backtest_loads_cached_bars_and_writes_summary(tmp_path: Path) -
         "max_drawdown_duration_trades": 1,
         "max_consecutive_losing_trades": 1,
         "max_post_exit_max_favorable_pnl": "0.0",
+        "avg_mfe": "0.5",
+        "median_mfe": "0.5",
+        "avg_mae": "0.5",
+        "median_mae": "0.5",
+        "avg_final_r": "-0.009852216748768472906403940887",
+        "median_final_r": "-0.009852216748768472906403940887",
+        "avg_max_favorable_r": "0.004926108374384236453201970443",
+        "median_max_favorable_r": "0.004926108374384236453201970443",
+        "avg_max_adverse_r": "0.004926108374384236453201970443",
+        "median_max_adverse_r": "0.004926108374384236453201970443",
+        "pct_reached_1r": "0",
+        "pct_reached_2r": "0",
+        "pct_reached_3r": "0",
+        "pct_reached_1r_then_negative": "0",
         "median_holding_minutes": "10",
         "median_post_exit_max_favorable_pnl": "0.0",
         "median_trade_pnl": "-1.0",
@@ -485,38 +489,27 @@ def test_minimal_backtest_reports_trade_breakdowns(tmp_path: Path) -> None:
     assert summary.average_post_exit_max_favorable_pnl == Decimal("0.0")
     assert summary.median_post_exit_max_favorable_pnl == Decimal("0.0")
     assert summary.max_post_exit_max_favorable_pnl == Decimal("0.0")
-    expected_trade_bucket = {
-        "average_holding_minutes": "10",
-        "average_loss": "-1.0",
-        "average_post_exit_max_favorable_pnl": "0.0",
-        "average_win": "0",
-        "closed_trades": 1,
-        "expectancy": "-1.0",
-        "losing_trades": 1,
-        "max_post_exit_max_favorable_pnl": "0.0",
-        "median_holding_minutes": "10",
-        "median_post_exit_max_favorable_pnl": "0.0",
-        "profit_factor": "0",
-        "total_pnl": "-1.0",
-        "win_rate": "0",
-        "winning_trades": 0,
-    }
-    expected_empty_trade_bucket = {
-        "average_holding_minutes": "0",
-        "average_loss": "0",
-        "average_post_exit_max_favorable_pnl": "0",
-        "average_win": "0",
-        "closed_trades": 0,
-        "expectancy": "0",
-        "losing_trades": 0,
-        "max_post_exit_max_favorable_pnl": "0",
-        "median_holding_minutes": "0",
-        "median_post_exit_max_favorable_pnl": "0",
-        "profit_factor": "0",
-        "total_pnl": "0",
-        "win_rate": "0",
-        "winning_trades": 0,
-    }
+    expected_trade_bucket = _trade_bucket(
+        total_pnl="-1.0",
+        average_loss="-1.0",
+        average_holding_minutes="10",
+        median_holding_minutes="10",
+        average_post_exit_max_favorable_pnl="0.0",
+        median_post_exit_max_favorable_pnl="0.0",
+        max_post_exit_max_favorable_pnl="0.0",
+        avg_mfe="0.5",
+        median_mfe="0.5",
+        avg_mae="0.5",
+        median_mae="0.5",
+        avg_final_r="-0.009852216748768472906403940887",
+        avg_max_favorable_r="0.004926108374384236453201970443",
+        avg_max_adverse_r="0.004926108374384236453201970443",
+        pct_reached_1r="0",
+        pct_reached_2r="0",
+        pct_reached_3r="0",
+        pct_reached_1r_then_negative="0",
+    )
+    expected_empty_trade_bucket = _empty_trade_bucket()
     assert summary.daily_breakdown == {"2026-06-26": expected_trade_bucket}
     assert summary.weekday_breakdown == {"4_Friday": expected_trade_bucket}
     assert summary.time_of_day_breakdown == {"09:30-10:00": expected_trade_bucket}
@@ -553,6 +546,121 @@ def test_minimal_backtest_reports_trade_breakdowns(tmp_path: Path) -> None:
     assert summary.full_session_diagnostic_regime_side_breakdown == {
         "long:chop_or_mixed_diagnostic": expected_trade_bucket
     }
+
+
+def test_minimal_backtest_tracks_long_mfe_and_r_diagnostics(tmp_path: Path) -> None:
+    request = _request()
+    _save_bars(
+        tmp_path,
+        request,
+        (
+            _bar_at(day=26, hour=13, minute=30, open=100.0, close=100.0, volume=1_000),
+            _bar_at(day=26, hour=13, minute=35, open=100.0, close=101.0, volume=1_000),
+            Bar(
+                instrument_id="SPY.US",
+                timeframe="5Min",
+                timestamp_utc=datetime(2026, 6, 26, 13, 40, tzinfo=UTC),
+                open=100.0,
+                high=103.0,
+                low=99.5,
+                close=102.0,
+                volume=1_000,
+                session="regular",
+            ),
+            Bar(
+                instrument_id="SPY.US",
+                timeframe="5Min",
+                timestamp_utc=datetime(2026, 6, 26, 13, 45, tzinfo=UTC),
+                open=102.0,
+                high=102.0,
+                low=98.5,
+                close=99.5,
+                volume=1_000,
+                session="regular",
+            ),
+        ),
+    )
+
+    summary = run_minimal_backtest(
+        request=request,
+        cache_dir=tmp_path,
+        output_path=None,
+        strategy=_ScriptedLongDiagnosticsStrategy(),
+        quantity=Decimal("1"),
+    )
+
+    assert summary.closed_trades == 1
+    assert summary.avg_mfe == Decimal("3.0")
+    assert summary.median_mfe == Decimal("3.0")
+    assert summary.avg_mae == Decimal("1.5")
+    assert summary.median_mae == Decimal("1.5")
+    assert summary.avg_final_r == Decimal("-1.0")
+    assert summary.median_final_r == Decimal("-1.0")
+    assert summary.avg_max_favorable_r == Decimal("3.0")
+    assert summary.median_max_favorable_r == Decimal("3.0")
+    assert summary.avg_max_adverse_r == Decimal("1.5")
+    assert summary.median_max_adverse_r == Decimal("1.5")
+    assert summary.pct_reached_1r == Decimal("1")
+    assert summary.pct_reached_2r == Decimal("1")
+    assert summary.pct_reached_3r == Decimal("1")
+    assert summary.pct_reached_1r_then_negative == Decimal("1")
+    assert summary.side_breakdown["long"]["avg_mfe"] == "3.0"
+    assert summary.side_breakdown["long"]["avg_final_r"] == "-1"
+
+
+def test_minimal_backtest_tracks_short_mae_and_r_diagnostics(tmp_path: Path) -> None:
+    request = _request()
+    _save_bars(
+        tmp_path,
+        request,
+        (
+            _bar_at(day=26, hour=13, minute=30, open=100.0, close=100.0, volume=1_000),
+            _bar_at(day=26, hour=13, minute=35, open=100.0, close=99.0, volume=1_000),
+            Bar(
+                instrument_id="SPY.US",
+                timeframe="5Min",
+                timestamp_utc=datetime(2026, 6, 26, 13, 40, tzinfo=UTC),
+                open=100.0,
+                high=102.5,
+                low=99.5,
+                close=101.0,
+                volume=1_000,
+                session="regular",
+            ),
+            Bar(
+                instrument_id="SPY.US",
+                timeframe="5Min",
+                timestamp_utc=datetime(2026, 6, 26, 13, 45, tzinfo=UTC),
+                open=101.0,
+                high=101.5,
+                low=100.0,
+                close=101.0,
+                volume=1_000,
+                session="regular",
+            ),
+        ),
+    )
+
+    summary = run_minimal_backtest(
+        request=request,
+        cache_dir=tmp_path,
+        output_path=None,
+        strategy=_ScriptedShortDiagnosticsStrategy(),
+        quantity=Decimal("1"),
+    )
+
+    assert summary.closed_trades == 1
+    assert summary.avg_mfe == Decimal("0.5")
+    assert summary.avg_mae == Decimal("2.5")
+    assert summary.avg_final_r == Decimal("-1.0")
+    assert summary.avg_max_favorable_r == Decimal("0.5")
+    assert summary.avg_max_adverse_r == Decimal("2.5")
+    assert summary.pct_reached_1r == Decimal("0")
+    assert summary.pct_reached_2r == Decimal("0")
+    assert summary.pct_reached_3r == Decimal("0")
+    assert summary.pct_reached_1r_then_negative == Decimal("0")
+    assert summary.side_breakdown["short"]["avg_mae"] == "2.5"
+    assert summary.side_breakdown["short"]["avg_max_adverse_r"] == "2.5"
 
 
 def test_minimal_backtest_reports_robustness_concentration_and_splits(
@@ -674,11 +782,7 @@ def _save_sample_bars(cache_dir: Path, request: HistoricalBarsRequest) -> None:
         _bar(open=102.0, close=101.0, minute=45),
         _bar(open=100.5, close=100.0, minute=50),
     )
-    session_config = MarketSessionConfig.xnys_regular()
-    regular_bars = tuple(
-        bar for bar in bars if session_config.classify(bar.timestamp_utc) == "regular"
-    )
-    LocalMarketDataStore(cache_dir).save_normalized_bars(regular_bars, request, session_config)
+    _save_bars(cache_dir, request, bars)
 
 
 def _save_two_trade_sample_bars(cache_dir: Path, request: HistoricalBarsRequest) -> None:
@@ -693,11 +797,7 @@ def _save_two_trade_sample_bars(cache_dir: Path, request: HistoricalBarsRequest)
         _bar_at(day=26, hour=14, minute=5, open=102.0, close=101.0, volume=1_000),
         _bar_at(day=26, hour=14, minute=10, open=102.0, close=102.0, volume=1_000),
     )
-    session_config = MarketSessionConfig.xnys_regular()
-    regular_bars = tuple(
-        bar for bar in bars if session_config.classify(bar.timestamp_utc) == "regular"
-    )
-    LocalMarketDataStore(cache_dir).save_normalized_bars(regular_bars, request, session_config)
+    _save_bars(cache_dir, request, bars)
 
 
 def _save_macro_event_sample_bars(cache_dir: Path, request: HistoricalBarsRequest) -> None:
@@ -708,11 +808,99 @@ def _save_macro_event_sample_bars(cache_dir: Path, request: HistoricalBarsReques
         _bar_at(day=10, hour=13, minute=45, open=102.0, close=101.0, volume=1_000),
         _bar_at(day=10, hour=13, minute=50, open=100.5, close=100.0, volume=1_000),
     )
+    _save_bars(cache_dir, request, bars)
+
+
+def _save_bars(
+    cache_dir: Path,
+    request: HistoricalBarsRequest,
+    bars: tuple[Bar, ...],
+) -> None:
     session_config = MarketSessionConfig.xnys_regular()
     regular_bars = tuple(
         bar for bar in bars if session_config.classify(bar.timestamp_utc) == "regular"
     )
     LocalMarketDataStore(cache_dir).save_normalized_bars(regular_bars, request, session_config)
+
+
+def _trade_bucket(
+    *,
+    total_pnl: str,
+    average_loss: str,
+    average_holding_minutes: str,
+    median_holding_minutes: str,
+    average_post_exit_max_favorable_pnl: str,
+    median_post_exit_max_favorable_pnl: str,
+    max_post_exit_max_favorable_pnl: str,
+    avg_mfe: str,
+    median_mfe: str,
+    avg_mae: str,
+    median_mae: str,
+    avg_final_r: str,
+    avg_max_favorable_r: str,
+    avg_max_adverse_r: str,
+    pct_reached_1r: str,
+    pct_reached_2r: str,
+    pct_reached_3r: str,
+    pct_reached_1r_then_negative: str,
+) -> dict[str, str | int]:
+    return {
+        "average_holding_minutes": average_holding_minutes,
+        "average_loss": average_loss,
+        "average_post_exit_max_favorable_pnl": average_post_exit_max_favorable_pnl,
+        "average_win": "0",
+        "avg_final_r": avg_final_r,
+        "avg_mae": avg_mae,
+        "avg_max_adverse_r": avg_max_adverse_r,
+        "avg_max_favorable_r": avg_max_favorable_r,
+        "avg_mfe": avg_mfe,
+        "closed_trades": 1,
+        "expectancy": total_pnl,
+        "losing_trades": 1,
+        "max_post_exit_max_favorable_pnl": max_post_exit_max_favorable_pnl,
+        "median_holding_minutes": median_holding_minutes,
+        "median_mae": median_mae,
+        "median_mfe": median_mfe,
+        "median_post_exit_max_favorable_pnl": median_post_exit_max_favorable_pnl,
+        "pct_reached_1r": pct_reached_1r,
+        "pct_reached_1r_then_negative": pct_reached_1r_then_negative,
+        "pct_reached_2r": pct_reached_2r,
+        "pct_reached_3r": pct_reached_3r,
+        "profit_factor": "0",
+        "total_pnl": total_pnl,
+        "win_rate": "0",
+        "winning_trades": 0,
+    }
+
+
+def _empty_trade_bucket() -> dict[str, str | int]:
+    return {
+        "average_holding_minutes": "0",
+        "average_loss": "0",
+        "average_post_exit_max_favorable_pnl": "0",
+        "average_win": "0",
+        "avg_final_r": "0",
+        "avg_mae": "0",
+        "avg_max_adverse_r": "0",
+        "avg_max_favorable_r": "0",
+        "avg_mfe": "0",
+        "closed_trades": 0,
+        "expectancy": "0",
+        "losing_trades": 0,
+        "max_post_exit_max_favorable_pnl": "0",
+        "median_holding_minutes": "0",
+        "median_mae": "0",
+        "median_mfe": "0",
+        "median_post_exit_max_favorable_pnl": "0",
+        "pct_reached_1r": "0",
+        "pct_reached_1r_then_negative": "0",
+        "pct_reached_2r": "0",
+        "pct_reached_3r": "0",
+        "profit_factor": "0",
+        "total_pnl": "0",
+        "win_rate": "0",
+        "winning_trades": 0,
+    }
 
 
 def _bar(*, open: float, close: float, minute: int) -> Bar:
@@ -830,6 +1018,76 @@ class _ScriptedTwoTradeStrategy:
         elif context.sequence_number in (4, 8) and context.position_quantity > 0:
             action = DecisionAction.EXIT_LONG
             reason = "scripted_long_exit"
+
+        return StrategyDecision(
+            strategy_run_id=context.strategy_run_id,
+            strategy_name=self.name,
+            action=action,
+            input_refs=(context.input_ref,),
+            reason=f"{reason}:{bar.instrument_id}",
+            decided_at_utc=context.input_ref.observed_at_utc,
+            strategy_decision_id=StrategyDecisionId(
+                f"{context.strategy_run_id.value}-strategy-decision-{context.sequence_number:04d}"
+            ),
+        )
+
+
+class _ScriptedLongDiagnosticsStrategy:
+    name: ClassVar[str] = "scripted-long-diagnostics"
+
+    def __init__(self) -> None:
+        self._state = SimpleNamespace(active_stop=None)
+
+    def decide(
+        self,
+        *,
+        bar: Bar,
+        context: StrategyDecisionContext,
+    ) -> StrategyDecision:
+        action = DecisionAction.HOLD
+        reason = "scripted_hold"
+        if context.sequence_number == 2 and context.position_quantity == 0:
+            self._state.active_stop = Decimal("99")
+            action = DecisionAction.ENTER_LONG
+            reason = "scripted_long_entry"
+        elif context.sequence_number == 4 and context.position_quantity > 0:
+            action = DecisionAction.EXIT_LONG
+            reason = "scripted_long_exit@99"
+
+        return StrategyDecision(
+            strategy_run_id=context.strategy_run_id,
+            strategy_name=self.name,
+            action=action,
+            input_refs=(context.input_ref,),
+            reason=f"{reason}:{bar.instrument_id}",
+            decided_at_utc=context.input_ref.observed_at_utc,
+            strategy_decision_id=StrategyDecisionId(
+                f"{context.strategy_run_id.value}-strategy-decision-{context.sequence_number:04d}"
+            ),
+        )
+
+
+class _ScriptedShortDiagnosticsStrategy:
+    name: ClassVar[str] = "scripted-short-diagnostics"
+
+    def __init__(self) -> None:
+        self._state = SimpleNamespace(active_stop=None)
+
+    def decide(
+        self,
+        *,
+        bar: Bar,
+        context: StrategyDecisionContext,
+    ) -> StrategyDecision:
+        action = DecisionAction.HOLD
+        reason = "scripted_hold"
+        if context.sequence_number == 2 and context.position_quantity == 0:
+            self._state.active_stop = Decimal("101")
+            action = DecisionAction.ENTER_SHORT
+            reason = "scripted_short_entry"
+        elif context.sequence_number == 4 and context.position_quantity < 0:
+            action = DecisionAction.EXIT_SHORT
+            reason = "scripted_short_exit@101"
 
         return StrategyDecision(
             strategy_run_id=context.strategy_run_id,
