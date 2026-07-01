@@ -144,9 +144,13 @@ Backtests select strategies by name with `--strategy`. The active registry is in
 
 `packages/trade_strategies/src/trade_strategies/registry.py`
 
-On the current branch, the registered CLI strategy is:
+The current branch exposes these built-in CLI strategies:
 
 - `close-momentum`
+- `spy-opening-range-breakout-trend-hold-midpoint-stop-max-1`
+- `spy-opening-range-breakout-trend-hold-midpoint-stop-max-2`
+- `spy-opening-range-breakout-trend-hold-opposite-stop-max-1`
+- `spy-opening-range-breakout-trend-hold-opposite-stop-max-2`
 
 If a strategy is not registered there, it is not runnable from the CLI even if
 older research notes mention it.
@@ -161,9 +165,49 @@ Important behavior:
 - signals are evaluated on the completed bar
 - approved market intents fill at the next bar open
 - the runner does not fill at the same close that created the signal
+- strategies may request an explicit same-bar exit reference by embedding
+  `@price` in the decision reason for stop or forced-flat exits
 - realized and unrealized PnL are reported separately
 - an open position or unfilled approved order at the end of the window remains
   visible in `ending_position` and `pending_orders`
+
+## Default Run Report
+
+Every backtest summary JSON now includes a compact top-level report contract for
+research comparisons:
+
+- `strategy_name`
+- `variant_name`
+- `trades`
+- `long_trades`
+- `short_trades`
+- `gross_pnl`
+- `costed_pnl`
+- `profit_factor`
+- `expectancy_per_trade`
+- `win_rate`
+- `average_win`
+- `average_loss`
+- `max_drawdown`
+- `worst_rolling_3_month`
+- `worst_rolling_6_month`
+- `largest_trade_pct_of_total_pnl`
+- `top_5_absolute_trades_pct_of_total_pnl`
+- `long_pnl`
+- `short_pnl`
+- `long_pf`
+- `short_pf`
+- `long_expectancy`
+- `short_expectancy`
+
+The same summary also keeps grouped breakdowns for:
+
+- `year_breakdown`
+- `month_breakdown`
+- `time_of_day_breakdown`
+- `opening_range_pct_breakdown`
+- `side_breakdown`
+- `exit_type_breakdown`
 
 ## Add A Strategy
 

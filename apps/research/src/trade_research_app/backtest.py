@@ -73,6 +73,8 @@ class ClosedTrade:
             trade's original direction, measured from the simulated exit fill price.
         gap_bucket: Session gap bucket derived from prior regular-session close.
         opening_range_state: Session state after the first 30 minutes.
+        opening_range_pct_bucket: Opening-range width bucket as a share of the
+            9:30 bar open.
         opening_drive_return_bucket: First-30-minute return bucket.
         opening_drive_close_position_bucket: First-30-minute close location bucket.
         daily_trend_state: Completed-daily SMA context known before session open.
@@ -85,6 +87,7 @@ class ClosedTrade:
         entry_time_regime_label: Entry-time regime label calculated without future bars.
         full_session_diagnostic_regime_label: Full-session diagnostic regime label. This may use
             future bars and must not be used as a strategy input.
+        variant_name: Strategy variant label used for grouped research output.
         macro_event_labels: Reporting-only scheduled macro event labels for the
             market-local exit date.
         pnl: Net realized PnL after entry/exit commissions and slippage.
@@ -99,6 +102,7 @@ class ClosedTrade:
     post_exit_max_favorable_pnl: Decimal
     gap_bucket: str
     opening_range_state: str
+    opening_range_pct_bucket: str
     opening_drive_return_bucket: str
     opening_drive_close_position_bucket: str
     daily_trend_state: str
@@ -110,6 +114,7 @@ class ClosedTrade:
     signal_bar_body_pct_bucket: str
     entry_time_regime_label: str
     full_session_diagnostic_regime_label: str
+    variant_name: str
     macro_event_labels: tuple[str, ...]
     pnl: Decimal
 
@@ -230,8 +235,14 @@ class BacktestSummary:
     """
 
     strategy_name: str
+    variant_name: str
     instrument_id: str
     timeframe: str
+    trades: int
+    long_trades: int
+    short_trades: int
+    gross_pnl: Decimal
+    costed_pnl: Decimal
     bars_loaded: int
     decisions: int
     approved_orders: int
@@ -269,14 +280,28 @@ class BacktestSummary:
     average_post_exit_max_favorable_pnl: Decimal
     median_post_exit_max_favorable_pnl: Decimal
     max_post_exit_max_favorable_pnl: Decimal
+    worst_rolling_3_month: Decimal
+    worst_rolling_6_month: Decimal
+    largest_trade_pct_of_total_pnl: Decimal
+    top_5_absolute_trades_pct_of_total_pnl: Decimal
+    long_pnl: Decimal
+    short_pnl: Decimal
+    long_pf: Decimal
+    short_pf: Decimal
+    long_expectancy: Decimal
+    short_expectancy: Decimal
     daily_breakdown: dict[str, dict[str, str | int]]
+    year_breakdown: dict[str, dict[str, str | int]]
+    month_breakdown: dict[str, dict[str, str | int]]
     weekday_breakdown: dict[str, dict[str, str | int]]
     time_of_day_breakdown: dict[str, dict[str, str | int]]
     side_breakdown: dict[str, dict[str, str | int]]
+    exit_type_breakdown: dict[str, dict[str, str | int]]
     exit_reason_breakdown: dict[str, dict[str, str | int]]
     holding_time_breakdown: dict[str, dict[str, str | int]]
     gap_breakdown: dict[str, dict[str, str | int]]
     opening_range_breakdown: dict[str, dict[str, str | int]]
+    opening_range_pct_breakdown: dict[str, dict[str, str | int]]
     opening_drive_return_breakdown: dict[str, dict[str, str | int]]
     opening_drive_close_position_breakdown: dict[str, dict[str, str | int]]
     daily_trend_breakdown: dict[str, dict[str, str | int]]
@@ -303,8 +328,14 @@ class BacktestSummary:
         """Serialize the summary using JSON-safe primitives."""
         return {
             "strategy_name": self.strategy_name,
+            "variant_name": self.variant_name,
             "instrument_id": self.instrument_id,
             "timeframe": self.timeframe,
+            "trades": self.trades,
+            "long_trades": self.long_trades,
+            "short_trades": self.short_trades,
+            "gross_pnl": str(self.gross_pnl),
+            "costed_pnl": str(self.costed_pnl),
             "bars_loaded": self.bars_loaded,
             "decisions": self.decisions,
             "approved_orders": self.approved_orders,
@@ -342,14 +373,30 @@ class BacktestSummary:
             "average_post_exit_max_favorable_pnl": str(self.average_post_exit_max_favorable_pnl),
             "median_post_exit_max_favorable_pnl": str(self.median_post_exit_max_favorable_pnl),
             "max_post_exit_max_favorable_pnl": str(self.max_post_exit_max_favorable_pnl),
+            "worst_rolling_3_month": str(self.worst_rolling_3_month),
+            "worst_rolling_6_month": str(self.worst_rolling_6_month),
+            "largest_trade_pct_of_total_pnl": str(self.largest_trade_pct_of_total_pnl),
+            "top_5_absolute_trades_pct_of_total_pnl": str(
+                self.top_5_absolute_trades_pct_of_total_pnl
+            ),
+            "long_pnl": str(self.long_pnl),
+            "short_pnl": str(self.short_pnl),
+            "long_pf": str(self.long_pf),
+            "short_pf": str(self.short_pf),
+            "long_expectancy": str(self.long_expectancy),
+            "short_expectancy": str(self.short_expectancy),
             "daily_breakdown": self.daily_breakdown,
+            "year_breakdown": self.year_breakdown,
+            "month_breakdown": self.month_breakdown,
             "weekday_breakdown": self.weekday_breakdown,
             "time_of_day_breakdown": self.time_of_day_breakdown,
             "side_breakdown": self.side_breakdown,
+            "exit_type_breakdown": self.exit_type_breakdown,
             "exit_reason_breakdown": self.exit_reason_breakdown,
             "holding_time_breakdown": self.holding_time_breakdown,
             "gap_breakdown": self.gap_breakdown,
             "opening_range_breakdown": self.opening_range_breakdown,
+            "opening_range_pct_breakdown": self.opening_range_pct_breakdown,
             "opening_drive_return_breakdown": self.opening_drive_return_breakdown,
             "opening_drive_close_position_breakdown": (self.opening_drive_close_position_breakdown),
             "daily_trend_breakdown": self.daily_trend_breakdown,
@@ -472,6 +519,7 @@ def run_minimal_backtest(
                         post_exit_max_favorable_pnl=Decimal("0"),
                         gap_bucket="unknown_gap",
                         opening_range_state="unknown_opening_range",
+                        opening_range_pct_bucket="unknown_opening_range_pct",
                         opening_drive_return_bucket="unknown_opening_drive_return",
                         opening_drive_close_position_bucket="unknown_opening_drive",
                         daily_trend_state="unknown_daily_trend",
@@ -487,6 +535,7 @@ def run_minimal_backtest(
                         full_session_diagnostic_regime_label=(
                             "unknown_full_session_diagnostic_regime"
                         ),
+                        variant_name=_strategy_variant_name(strategy),
                         macro_event_labels=(),
                         pnl=trade_pnl,
                     )
@@ -598,6 +647,7 @@ def run_minimal_backtest(
                         post_exit_max_favorable_pnl=Decimal("0"),
                         gap_bucket="unknown_gap",
                         opening_range_state="unknown_opening_range",
+                        opening_range_pct_bucket="unknown_opening_range_pct",
                         opening_drive_return_bucket="unknown_opening_drive_return",
                         opening_drive_close_position_bucket="unknown_opening_drive",
                         daily_trend_state="unknown_daily_trend",
@@ -613,6 +663,7 @@ def run_minimal_backtest(
                         full_session_diagnostic_regime_label=(
                             "unknown_full_session_diagnostic_regime"
                         ),
+                        variant_name=_strategy_variant_name(strategy),
                         macro_event_labels=(),
                         pnl=trade_pnl,
                     )
@@ -670,6 +721,8 @@ def run_minimal_backtest(
     )
     trade_metrics = _trade_metrics(closed_trades)
     daily_breakdown = _closed_trade_breakdown(closed_trades, timezone=session_config.timezone)
+    year_breakdown = _year_breakdown(closed_trades, timezone=session_config.timezone)
+    month_breakdown = _month_breakdown(closed_trades, timezone=session_config.timezone)
     weekday_breakdown = _weekday_breakdown(
         closed_trades,
         timezone=session_config.timezone,
@@ -685,6 +738,10 @@ def run_minimal_backtest(
     opening_range_breakdown = _regime_breakdown(
         closed_trades,
         tag_name="opening_range_state",
+    )
+    opening_range_pct_breakdown = _regime_breakdown(
+        closed_trades,
+        tag_name="opening_range_pct_bucket",
     )
     opening_drive_return_breakdown = _regime_breakdown(
         closed_trades,
@@ -751,10 +808,18 @@ def run_minimal_backtest(
         window_days=182,
     )
     total_execution_costs = total_commissions + total_slippage_cost
+    long_trades = _breakdown_closed_trades(side_breakdown, "long")
+    short_trades = _breakdown_closed_trades(side_breakdown, "short")
     summary = BacktestSummary(
-        strategy_name=strategy.name,
+        strategy_name=_strategy_family_name(strategy),
+        variant_name=_strategy_variant_name(strategy),
         instrument_id=request.instrument.instrument_id,
         timeframe=request.timeframe,
+        trades=trade_metrics.closed_trades,
+        long_trades=long_trades,
+        short_trades=short_trades,
+        gross_pnl=realized_pnl + unrealized_pnl + total_execution_costs,
+        costed_pnl=realized_pnl + unrealized_pnl,
         bars_loaded=len(bars),
         decisions=decisions,
         approved_orders=len(risk_decisions),
@@ -801,14 +866,34 @@ def run_minimal_backtest(
         average_post_exit_max_favorable_pnl=trade_metrics.average_post_exit_max_favorable_pnl,
         median_post_exit_max_favorable_pnl=trade_metrics.median_post_exit_max_favorable_pnl,
         max_post_exit_max_favorable_pnl=trade_metrics.max_post_exit_max_favorable_pnl,
+        worst_rolling_3_month=_worst_rolling_pnl(rolling_3_month_breakdown),
+        worst_rolling_6_month=_worst_rolling_pnl(rolling_6_month_breakdown),
+        largest_trade_pct_of_total_pnl=_contribution_pct_of_total_pnl(
+            trade_contribution_breakdown,
+            "top_1",
+        ),
+        top_5_absolute_trades_pct_of_total_pnl=_contribution_pct_of_total_pnl(
+            trade_contribution_breakdown,
+            "top_5",
+        ),
+        long_pnl=_breakdown_decimal_metric(side_breakdown, "long", "total_pnl"),
+        short_pnl=_breakdown_decimal_metric(side_breakdown, "short", "total_pnl"),
+        long_pf=_breakdown_decimal_metric(side_breakdown, "long", "profit_factor"),
+        short_pf=_breakdown_decimal_metric(side_breakdown, "short", "profit_factor"),
+        long_expectancy=_breakdown_decimal_metric(side_breakdown, "long", "expectancy"),
+        short_expectancy=_breakdown_decimal_metric(side_breakdown, "short", "expectancy"),
         daily_breakdown=daily_breakdown,
+        year_breakdown=year_breakdown,
+        month_breakdown=month_breakdown,
         weekday_breakdown=weekday_breakdown,
         time_of_day_breakdown=time_of_day_breakdown,
         side_breakdown=side_breakdown,
+        exit_type_breakdown=exit_reason_breakdown,
         exit_reason_breakdown=exit_reason_breakdown,
         holding_time_breakdown=holding_time_breakdown,
         gap_breakdown=gap_breakdown,
         opening_range_breakdown=opening_range_breakdown,
+        opening_range_pct_breakdown=opening_range_pct_breakdown,
         opening_drive_return_breakdown=opening_drive_return_breakdown,
         opening_drive_close_position_breakdown=opening_drive_close_position_breakdown,
         daily_trend_breakdown=daily_trend_breakdown,
@@ -1149,6 +1234,7 @@ class SessionRegimeTags:
 
     gap_bucket: str
     opening_range_state: str
+    opening_range_pct_bucket: str
     opening_drive_return_bucket: str
     opening_drive_close_position_bucket: str
     daily_trend_state: str
@@ -1178,6 +1264,7 @@ def _with_regime_tags(
             SessionRegimeTags(
                 gap_bucket="unknown_gap",
                 opening_range_state="unknown_opening_range",
+                opening_range_pct_bucket="unknown_opening_range_pct",
                 opening_drive_return_bucket="unknown_opening_drive_return",
                 opening_drive_close_position_bucket="unknown_opening_drive",
                 daily_trend_state="unknown_daily_trend",
@@ -1191,6 +1278,7 @@ def _with_regime_tags(
                 trade,
                 gap_bucket=tags.gap_bucket,
                 opening_range_state=tags.opening_range_state,
+                opening_range_pct_bucket=tags.opening_range_pct_bucket,
                 opening_drive_return_bucket=tags.opening_drive_return_bucket,
                 opening_drive_close_position_bucket=tags.opening_drive_close_position_bucket,
                 daily_trend_state=tags.daily_trend_state,
@@ -1378,6 +1466,10 @@ def session_regime_tags(
                 bars_for_date,
                 zone=zone,
             ),
+            opening_range_pct_bucket=_opening_range_pct_bucket(
+                bars_for_date,
+                zone=zone,
+            ),
             opening_drive_return_bucket=_opening_drive_return_bucket(
                 bars_for_date,
                 zone=zone,
@@ -1470,6 +1562,38 @@ def _opening_range_state(
     if reference_close < opening_low:
         return "below_opening_range"
     return "inside_opening_range"
+
+
+def _opening_range_pct_bucket(
+    bars: Sequence[Bar],
+    *,
+    zone: ZoneInfo,
+) -> str:
+    """Bucket opening-range width as a share of the 9:30 bar open."""
+    opening_bars = [
+        bar
+        for bar in bars
+        if bar.timestamp_utc.astimezone(zone).time().hour == 9
+        and bar.timestamp_utc.astimezone(zone).time().minute < 60
+    ][:6]
+    if len(opening_bars) < 6:
+        return "unknown_opening_range_pct"
+
+    opening_open = Decimal(str(opening_bars[0].open))
+    if opening_open == 0:
+        return "unknown_opening_range_pct"
+    opening_high = max(Decimal(str(bar.high)) for bar in opening_bars)
+    opening_low = min(Decimal(str(bar.low)) for bar in opening_bars)
+    opening_range_pct = (opening_high - opening_low) / opening_open
+    if opening_range_pct <= Decimal("0.0025"):
+        return "<= 0.25%"
+    if opening_range_pct <= Decimal("0.0050"):
+        return "0.25% to 0.50%"
+    if opening_range_pct <= Decimal("0.0075"):
+        return "0.50% to 0.75%"
+    if opening_range_pct <= Decimal("0.0100"):
+        return "0.75% to 1.00%"
+    return "> 1.00%"
 
 
 def _opening_drive_close_position_bucket(
@@ -2021,18 +2145,46 @@ def _closed_trade_breakdown(
     return {bucket: _trade_bucket_summary(trades) for bucket, trades in sorted(buckets.items())}
 
 
+def _year_breakdown(
+    closed_trades: list[ClosedTrade],
+    *,
+    timezone: str,
+) -> dict[str, dict[str, str | int]]:
+    """Group completed trades by market-local exit year."""
+    zone = ZoneInfo(timezone)
+    buckets: dict[str, list[ClosedTrade]] = {}
+    for trade in closed_trades:
+        label = f"{trade.exited_at_utc.astimezone(zone):%Y}"
+        buckets.setdefault(label, []).append(trade)
+    return {bucket: _trade_bucket_summary(trades) for bucket, trades in sorted(buckets.items())}
+
+
+def _month_breakdown(
+    closed_trades: list[ClosedTrade],
+    *,
+    timezone: str,
+) -> dict[str, dict[str, str | int]]:
+    """Group completed trades by market-local exit month."""
+    zone = ZoneInfo(timezone)
+    buckets: dict[str, list[ClosedTrade]] = {}
+    for trade in closed_trades:
+        label = f"{trade.exited_at_utc.astimezone(zone):%Y-%m}"
+        buckets.setdefault(label, []).append(trade)
+    return {bucket: _trade_bucket_summary(trades) for bucket, trades in sorted(buckets.items())}
+
+
 def _time_of_day_breakdown(
     closed_trades: list[ClosedTrade],
     *,
     timezone: str,
 ) -> dict[str, dict[str, str | int]]:
-    """Group completed trades into 30-minute market-local exit buckets."""
+    """Group completed trades into 30-minute market-local entry buckets."""
     zone = ZoneInfo(timezone)
     buckets: dict[str, list[ClosedTrade]] = {}
     for trade in closed_trades:
-        local_exit = trade.exited_at_utc.astimezone(zone)
-        bucket_minute = 30 if local_exit.minute >= 30 else 0
-        bucket_start = local_exit.replace(
+        local_entry = trade.entered_at_utc.astimezone(zone)
+        bucket_minute = 30 if local_entry.minute >= 30 else 0
+        bucket_start = local_entry.replace(
             minute=bucket_minute,
             second=0,
             microsecond=0,
@@ -2313,6 +2465,63 @@ def _trade_bucket_summary(trades: list[ClosedTrade]) -> dict[str, str | int]:
             max(post_exit_max_favorable_pnls) if post_exit_max_favorable_pnls else Decimal("0")
         ),
     }
+
+
+def _breakdown_closed_trades(
+    breakdown: dict[str, dict[str, str | int]],
+    bucket_name: str,
+) -> int:
+    """Return the closed-trade count for one named bucket."""
+    bucket = breakdown.get(bucket_name, {})
+    value = bucket.get("closed_trades", 0)
+    return int(value) if isinstance(value, int) else 0
+
+
+def _breakdown_decimal_metric(
+    breakdown: dict[str, dict[str, str | int]],
+    bucket_name: str,
+    metric_name: str,
+) -> Decimal:
+    """Return one Decimal metric from a named breakdown bucket."""
+    bucket = breakdown.get(bucket_name, {})
+    value = bucket.get(metric_name, "0")
+    return Decimal(str(value))
+
+
+def _worst_rolling_pnl(breakdown: dict[str, dict[str, str | int]]) -> Decimal:
+    """Return the lowest rolling-window total PnL from a breakdown map."""
+    if not breakdown:
+        return Decimal("0")
+    return min(Decimal(str(values["total_pnl"])) for values in breakdown.values())
+
+
+def _contribution_pct_of_total_pnl(
+    contribution_breakdown: dict[str, dict[str, str | int]],
+    bucket_name: str,
+) -> Decimal:
+    """Return positive concentration share using absolute PnL versus total PnL."""
+    bucket = contribution_breakdown.get(bucket_name, {})
+    selected_absolute_pnl = Decimal(str(bucket.get("selected_absolute_pnl", "0")))
+    selected_pnl = Decimal(str(bucket.get("selected_pnl", "0")))
+    share_of_total_pnl = Decimal(str(bucket.get("share_of_total_pnl", "0")))
+    if selected_pnl == 0 or share_of_total_pnl == 0:
+        return Decimal("0")
+    total_pnl = selected_pnl / share_of_total_pnl
+    if total_pnl == 0:
+        return Decimal("0")
+    return selected_absolute_pnl / abs(total_pnl)
+
+
+def _strategy_family_name(strategy: Strategy) -> str:
+    """Return the report-level family name for a strategy instance."""
+    family_name = getattr(strategy, "family_name", strategy.name)
+    return str(family_name)
+
+
+def _strategy_variant_name(strategy: Strategy) -> str:
+    """Return the report-level variant name for a strategy instance."""
+    variant_name = getattr(strategy, "variant_name", strategy.name)
+    return str(variant_name)
 
 
 def _decision_rule_reason(reason: str) -> str:
