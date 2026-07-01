@@ -6,6 +6,12 @@ from trade_strategies.registry import get_strategy, list_strategy_names
 from trade_strategies.spy_opening_range_breakout import (
     SpyOpeningRangeBreakoutMidpointStopMaxOneStrategy,
     SpyOpeningRangeBreakoutTrendHoldStrategy,
+    SpyOrbAtrTrail1_0Strategy,
+    SpyOrbAtrTrail1_5Strategy,
+    SpyOrbAtrTrail2_0Strategy,
+    SpyOrbAtrTrailStrategy,
+    SpyOrbBreakEvenAfter1RStrategy,
+    SpyOrbStructureTrailStrategy,
 )
 from trade_strategies.spy_vwap_pullback import (
     DailyContextVwapReclaimStrategy,
@@ -50,6 +56,12 @@ __all__ = [
     "CloseMomentumStrategy",
     "SpyOpeningRangeBreakoutMidpointStopMaxOneStrategy",
     "SpyOpeningRangeBreakoutTrendHoldStrategy",
+    "SpyOrbAtrTrail1_0Strategy",
+    "SpyOrbAtrTrail1_5Strategy",
+    "SpyOrbAtrTrail2_0Strategy",
+    "SpyOrbAtrTrailStrategy",
+    "SpyOrbBreakEvenAfter1RStrategy",
+    "SpyOrbStructureTrailStrategy",
     "DailyContextVwapReclaimStrategy",
     "DynamicVwapDistanceReclaimStrategy",
     "EntryFilteredTrendDayVwapReclaimStrategy",

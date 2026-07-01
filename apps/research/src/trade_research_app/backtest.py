@@ -8,6 +8,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from typing import TypedDict
 from zoneinfo import ZoneInfo
 
 from trade_core import (
@@ -91,6 +92,19 @@ class ClosedTrade:
         macro_event_labels: Reporting-only scheduled macro event labels for the
             market-local exit date.
         pnl: Net realized PnL after entry/exit commissions and slippage.
+        entry_price: Simulated entry fill price after slippage.
+        initial_stop_price: Stop price set at entry time, used as the R denominator.
+        mfe: Maximum Favorable Excursion in dollars for one unit. Best price move
+            in the trade's favor while the position was open.
+        mae: Maximum Adverse Excursion in dollars for one unit. Worst price move
+            against the trade while the position was open.
+        final_r: Final PnL expressed in R multiples, where R = |entry - stop|.
+        max_favorable_r: MFE expressed in R multiples.
+        max_adverse_r: MAE expressed in R multiples (positive = adverse).
+        reached_1r: Whether price reached +1R favorable while position was open.
+        reached_2r: Whether price reached +2R favorable while position was open.
+        reached_3r: Whether price reached +3R favorable while position was open.
+        reached_1r_then_negative: Whether the trade reached +1R but closed negative.
     """
 
     entered_at_utc: datetime
@@ -117,11 +131,38 @@ class ClosedTrade:
     variant_name: str
     macro_event_labels: tuple[str, ...]
     pnl: Decimal
+    entry_price: Decimal = Decimal("0")
+    initial_stop_price: Decimal = Decimal("0")
+    mfe: Decimal = Decimal("0")
+    mae: Decimal = Decimal("0")
+    final_r: Decimal = Decimal("0")
+    max_favorable_r: Decimal = Decimal("0")
+    max_adverse_r: Decimal = Decimal("0")
+    reached_1r: bool = False
+    reached_2r: bool = False
+    reached_3r: bool = False
+    reached_1r_then_negative: bool = False
 
     @property
     def holding_minutes(self) -> int:
         """Return completed holding time in whole minutes."""
         return int((self.exited_at_utc - self.entered_at_utc).total_seconds() // 60)
+
+
+class _TradeDiagnostics(TypedDict):
+    """Typed payload for per-trade excursion and R-multiple diagnostics."""
+
+    entry_price: Decimal
+    initial_stop_price: Decimal
+    mfe: Decimal
+    mae: Decimal
+    final_r: Decimal
+    max_favorable_r: Decimal
+    max_adverse_r: Decimal
+    reached_1r: bool
+    reached_2r: bool
+    reached_3r: bool
+    reached_1r_then_negative: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -280,6 +321,20 @@ class BacktestSummary:
     average_post_exit_max_favorable_pnl: Decimal
     median_post_exit_max_favorable_pnl: Decimal
     max_post_exit_max_favorable_pnl: Decimal
+    avg_mfe: Decimal
+    median_mfe: Decimal
+    avg_mae: Decimal
+    median_mae: Decimal
+    avg_final_r: Decimal
+    median_final_r: Decimal
+    avg_max_favorable_r: Decimal
+    median_max_favorable_r: Decimal
+    avg_max_adverse_r: Decimal
+    median_max_adverse_r: Decimal
+    pct_reached_1r: Decimal
+    pct_reached_2r: Decimal
+    pct_reached_3r: Decimal
+    pct_reached_1r_then_negative: Decimal
     worst_rolling_3_month: Decimal
     worst_rolling_6_month: Decimal
     largest_trade_pct_of_total_pnl: Decimal
@@ -373,6 +428,20 @@ class BacktestSummary:
             "average_post_exit_max_favorable_pnl": str(self.average_post_exit_max_favorable_pnl),
             "median_post_exit_max_favorable_pnl": str(self.median_post_exit_max_favorable_pnl),
             "max_post_exit_max_favorable_pnl": str(self.max_post_exit_max_favorable_pnl),
+            "avg_mfe": str(self.avg_mfe),
+            "median_mfe": str(self.median_mfe),
+            "avg_mae": str(self.avg_mae),
+            "median_mae": str(self.median_mae),
+            "avg_final_r": str(self.avg_final_r),
+            "median_final_r": str(self.median_final_r),
+            "avg_max_favorable_r": str(self.avg_max_favorable_r),
+            "median_max_favorable_r": str(self.median_max_favorable_r),
+            "avg_max_adverse_r": str(self.avg_max_adverse_r),
+            "median_max_adverse_r": str(self.median_max_adverse_r),
+            "pct_reached_1r": str(self.pct_reached_1r),
+            "pct_reached_2r": str(self.pct_reached_2r),
+            "pct_reached_3r": str(self.pct_reached_3r),
+            "pct_reached_1r_then_negative": str(self.pct_reached_1r_then_negative),
             "worst_rolling_3_month": str(self.worst_rolling_3_month),
             "worst_rolling_6_month": str(self.worst_rolling_6_month),
             "largest_trade_pct_of_total_pnl": str(self.largest_trade_pct_of_total_pnl),
@@ -470,6 +539,11 @@ def run_minimal_backtest(
     open_trade_commissions = Decimal("0")
     open_trade_entered_at_utc: datetime | None = None
     open_trade_entry_side: OrderSide | None = None
+    # MFE/MAE tracking: updated bar-by-bar while a position is open.
+    open_trade_entry_price = Decimal("0")
+    open_trade_initial_stop_price = Decimal("0")
+    open_trade_mfe = Decimal("0")
+    open_trade_mae = Decimal("0")
     decisions = 0
     risk_decisions: list[RiskDecision] = []
     fills: list[SimulatedFill] = []
@@ -538,18 +612,52 @@ def run_minimal_backtest(
                         variant_name=_strategy_variant_name(strategy),
                         macro_event_labels=(),
                         pnl=trade_pnl,
+                        **_compute_mfe_mae_r_diagnostics(
+                            entry_price=open_trade_entry_price,
+                            initial_stop_price=open_trade_initial_stop_price,
+                            mfe=open_trade_mfe,
+                            mae=open_trade_mae,
+                            pnl=trade_pnl,
+                            entry_side=_required_order_side(open_trade_entry_side),
+                        ),
                     )
                 )
             if _is_opening_fill(fill=fill, previous_position=previous_position):
                 open_trade_commissions += fill.commission
                 open_trade_entered_at_utc = fill.filled_at_utc
                 open_trade_entry_side = fill.side
+                open_trade_entry_price = fill.price
+                open_trade_initial_stop_price = _extract_stop_from_context(strategy)
+                open_trade_mfe = Decimal("0")
+                open_trade_mae = Decimal("0")
             elif trade_pnl is not None:
                 open_trade_commissions = Decimal("0")
                 open_trade_entered_at_utc = None
                 open_trade_entry_side = None
+                open_trade_entry_price = Decimal("0")
+                open_trade_initial_stop_price = Decimal("0")
+                open_trade_mfe = Decimal("0")
+                open_trade_mae = Decimal("0")
             pending_order_intent = None
             pending_exit_reason = None
+
+        # Track MFE/MAE for the open position using this bar's high/low.
+        # The bar has completed (we have OHLC), so the excursion happened
+        # during this bar's time window before any new decision is acted on.
+        if position > 0:
+            bar_high = Decimal(str(bar.high))
+            bar_low = Decimal(str(bar.low))
+            favorable = bar_high - open_trade_entry_price
+            adverse = open_trade_entry_price - bar_low
+            open_trade_mfe = max(open_trade_mfe, favorable)
+            open_trade_mae = max(open_trade_mae, adverse)
+        elif position < 0:
+            bar_high = Decimal(str(bar.high))
+            bar_low = Decimal(str(bar.low))
+            favorable = open_trade_entry_price - bar_low
+            adverse = bar_high - open_trade_entry_price
+            open_trade_mfe = max(open_trade_mfe, favorable)
+            open_trade_mae = max(open_trade_mae, adverse)
 
         # Bar timestamps identify the start of the OHLCV window. A close-based
         # signal only exists after the bar completes, so the input reference and
@@ -666,16 +774,32 @@ def run_minimal_backtest(
                         variant_name=_strategy_variant_name(strategy),
                         macro_event_labels=(),
                         pnl=trade_pnl,
+                        **_compute_mfe_mae_r_diagnostics(
+                            entry_price=open_trade_entry_price,
+                            initial_stop_price=open_trade_initial_stop_price,
+                            mfe=open_trade_mfe,
+                            mae=open_trade_mae,
+                            pnl=trade_pnl,
+                            entry_side=_required_order_side(open_trade_entry_side),
+                        ),
                     )
                 )
             if _is_opening_fill(fill=fill, previous_position=previous_position):
                 open_trade_commissions += fill.commission
                 open_trade_entered_at_utc = fill.filled_at_utc
                 open_trade_entry_side = fill.side
+                open_trade_entry_price = fill.price
+                open_trade_initial_stop_price = _extract_stop_from_context(strategy)
+                open_trade_mfe = Decimal("0")
+                open_trade_mae = Decimal("0")
             elif trade_pnl is not None:
                 open_trade_commissions = Decimal("0")
                 open_trade_entered_at_utc = None
                 open_trade_entry_side = None
+                open_trade_entry_price = Decimal("0")
+                open_trade_initial_stop_price = Decimal("0")
+                open_trade_mfe = Decimal("0")
+                open_trade_mae = Decimal("0")
             continue
         pending_order_intent = order_intent
         if decision.action in (DecisionAction.EXIT_LONG, DecisionAction.EXIT_SHORT):
@@ -866,6 +990,20 @@ def run_minimal_backtest(
         average_post_exit_max_favorable_pnl=trade_metrics.average_post_exit_max_favorable_pnl,
         median_post_exit_max_favorable_pnl=trade_metrics.median_post_exit_max_favorable_pnl,
         max_post_exit_max_favorable_pnl=trade_metrics.max_post_exit_max_favorable_pnl,
+        avg_mfe=trade_metrics.avg_mfe,
+        median_mfe=trade_metrics.median_mfe,
+        avg_mae=trade_metrics.avg_mae,
+        median_mae=trade_metrics.median_mae,
+        avg_final_r=trade_metrics.avg_final_r,
+        median_final_r=trade_metrics.median_final_r,
+        avg_max_favorable_r=trade_metrics.avg_max_favorable_r,
+        median_max_favorable_r=trade_metrics.median_max_favorable_r,
+        avg_max_adverse_r=trade_metrics.avg_max_adverse_r,
+        median_max_adverse_r=trade_metrics.median_max_adverse_r,
+        pct_reached_1r=trade_metrics.pct_reached_1r,
+        pct_reached_2r=trade_metrics.pct_reached_2r,
+        pct_reached_3r=trade_metrics.pct_reached_3r,
+        pct_reached_1r_then_negative=trade_metrics.pct_reached_1r_then_negative,
         worst_rolling_3_month=_worst_rolling_pnl(rolling_3_month_breakdown),
         worst_rolling_6_month=_worst_rolling_pnl(rolling_6_month_breakdown),
         largest_trade_pct_of_total_pnl=_contribution_pct_of_total_pnl(
@@ -1163,6 +1301,68 @@ def _is_opening_fill(*, fill: SimulatedFill, previous_position: Decimal) -> bool
     if previous_position != 0:
         return False
     return fill.side in (OrderSide.BUY, OrderSide.SELL)
+
+
+def _compute_mfe_mae_r_diagnostics(
+    *,
+    entry_price: Decimal,
+    initial_stop_price: Decimal,
+    mfe: Decimal,
+    mae: Decimal,
+    pnl: Decimal,
+    entry_side: OrderSide,
+) -> _TradeDiagnostics:
+    """Compute R-multiple diagnostics from MFE, MAE, and trade outcome.
+
+    R is the initial risk per unit: |entry_price - initial_stop_price|.
+    Favorable R is MFE / R. Adverse R is MAE / R.
+    """
+    risk = abs(entry_price - initial_stop_price)
+    if risk == 0:
+        # Degenerate case: no risk distance. Avoid division by zero.
+        return {
+            "entry_price": entry_price,
+            "initial_stop_price": initial_stop_price,
+            "mfe": mfe,
+            "mae": mae,
+            "final_r": Decimal("0"),
+            "max_favorable_r": Decimal("0"),
+            "max_adverse_r": Decimal("0"),
+            "reached_1r": False,
+            "reached_2r": False,
+            "reached_3r": False,
+            "reached_1r_then_negative": False,
+        }
+    final_r = pnl / risk
+    max_favorable_r = mfe / risk
+    max_adverse_r = mae / risk
+    return {
+        "entry_price": entry_price,
+        "initial_stop_price": initial_stop_price,
+        "mfe": mfe,
+        "mae": mae,
+        "final_r": final_r,
+        "max_favorable_r": max_favorable_r,
+        "max_adverse_r": max_adverse_r,
+        "reached_1r": max_favorable_r >= Decimal("1"),
+        "reached_2r": max_favorable_r >= Decimal("2"),
+        "reached_3r": max_favorable_r >= Decimal("3"),
+        "reached_1r_then_negative": max_favorable_r >= Decimal("1") and pnl < 0,
+    }
+
+
+def _extract_stop_from_context(strategy: Strategy) -> Decimal:
+    """Read the current active stop price from a strategy's internal state.
+
+    The ORB strategy family stores its stop in ``_state.active_stop``. This helper
+    reads that value at entry time so the backtest runner can compute R multiples.
+    """
+    state = getattr(strategy, "_state", None)
+    if state is not None:
+        active_stop = getattr(state, "active_stop", None)
+        if active_stop is not None:
+            return active_stop
+    return Decimal("0")
 
 
 def _required_order_side(value: OrderSide | None) -> OrderSide:
@@ -2015,6 +2215,20 @@ class _TradeMetrics:
     average_post_exit_max_favorable_pnl: Decimal
     median_post_exit_max_favorable_pnl: Decimal
     max_post_exit_max_favorable_pnl: Decimal
+    avg_mfe: Decimal
+    median_mfe: Decimal
+    avg_mae: Decimal
+    median_mae: Decimal
+    avg_final_r: Decimal
+    median_final_r: Decimal
+    avg_max_favorable_r: Decimal
+    median_max_favorable_r: Decimal
+    avg_max_adverse_r: Decimal
+    median_max_adverse_r: Decimal
+    pct_reached_1r: Decimal
+    pct_reached_2r: Decimal
+    pct_reached_3r: Decimal
+    pct_reached_1r_then_negative: Decimal
 
 
 def _trade_metrics(closed_trades: list[ClosedTrade]) -> _TradeMetrics:
@@ -2022,6 +2236,17 @@ def _trade_metrics(closed_trades: list[ClosedTrade]) -> _TradeMetrics:
     closed_trade_pnls = [trade.pnl for trade in closed_trades]
     holding_minutes = [Decimal(trade.holding_minutes) for trade in closed_trades]
     post_exit_max_favorable_pnls = [trade.post_exit_max_favorable_pnl for trade in closed_trades]
+    mfe_values = [trade.mfe for trade in closed_trades]
+    mae_values = [trade.mae for trade in closed_trades]
+    final_r_values = [trade.final_r for trade in closed_trades]
+    max_favorable_r_values = [trade.max_favorable_r for trade in closed_trades]
+    max_adverse_r_values = [trade.max_adverse_r for trade in closed_trades]
+    reached_1r_count = sum(1 for trade in closed_trades if trade.reached_1r)
+    reached_2r_count = sum(1 for trade in closed_trades if trade.reached_2r)
+    reached_3r_count = sum(1 for trade in closed_trades if trade.reached_3r)
+    reached_1r_then_negative_count = sum(
+        1 for trade in closed_trades if trade.reached_1r_then_negative
+    )
     winning_pnls = [pnl for pnl in closed_trade_pnls if pnl > 0]
     losing_pnls = [pnl for pnl in closed_trade_pnls if pnl < 0]
     gross_profit = sum(winning_pnls, Decimal("0"))
@@ -2074,6 +2299,56 @@ def _trade_metrics(closed_trades: list[ClosedTrade]) -> _TradeMetrics:
         median_post_exit_max_favorable_pnl=_median_decimal(post_exit_max_favorable_pnls),
         max_post_exit_max_favorable_pnl=(
             max(post_exit_max_favorable_pnls) if post_exit_max_favorable_pnls else Decimal("0")
+        ),
+        avg_mfe=(
+            sum(mfe_values, Decimal("0")) / Decimal(closed_trade_count)
+            if closed_trade_count
+            else Decimal("0")
+        ),
+        median_mfe=_median_decimal(mfe_values),
+        avg_mae=(
+            sum(mae_values, Decimal("0")) / Decimal(closed_trade_count)
+            if closed_trade_count
+            else Decimal("0")
+        ),
+        median_mae=_median_decimal(mae_values),
+        avg_final_r=(
+            sum(final_r_values, Decimal("0")) / Decimal(closed_trade_count)
+            if closed_trade_count
+            else Decimal("0")
+        ),
+        median_final_r=_median_decimal(final_r_values),
+        avg_max_favorable_r=(
+            sum(max_favorable_r_values, Decimal("0")) / Decimal(closed_trade_count)
+            if closed_trade_count
+            else Decimal("0")
+        ),
+        median_max_favorable_r=_median_decimal(max_favorable_r_values),
+        avg_max_adverse_r=(
+            sum(max_adverse_r_values, Decimal("0")) / Decimal(closed_trade_count)
+            if closed_trade_count
+            else Decimal("0")
+        ),
+        median_max_adverse_r=_median_decimal(max_adverse_r_values),
+        pct_reached_1r=(
+            Decimal(reached_1r_count) / Decimal(closed_trade_count)
+            if closed_trade_count
+            else Decimal("0")
+        ),
+        pct_reached_2r=(
+            Decimal(reached_2r_count) / Decimal(closed_trade_count)
+            if closed_trade_count
+            else Decimal("0")
+        ),
+        pct_reached_3r=(
+            Decimal(reached_3r_count) / Decimal(closed_trade_count)
+            if closed_trade_count
+            else Decimal("0")
+        ),
+        pct_reached_1r_then_negative=(
+            Decimal(reached_1r_then_negative_count) / Decimal(closed_trade_count)
+            if closed_trade_count
+            else Decimal("0")
         ),
     )
 
@@ -2463,6 +2738,53 @@ def _trade_bucket_summary(trades: list[ClosedTrade]) -> dict[str, str | int]:
         "median_post_exit_max_favorable_pnl": str(_median_decimal(post_exit_max_favorable_pnls)),
         "max_post_exit_max_favorable_pnl": str(
             max(post_exit_max_favorable_pnls) if post_exit_max_favorable_pnls else Decimal("0")
+        ),
+        "avg_mfe": str(
+            sum((t.mfe for t in trades), Decimal("0")) / Decimal(len(trades))
+            if trades
+            else Decimal("0")
+        ),
+        "median_mfe": str(_median_decimal([t.mfe for t in trades])),
+        "avg_mae": str(
+            sum((t.mae for t in trades), Decimal("0")) / Decimal(len(trades))
+            if trades
+            else Decimal("0")
+        ),
+        "median_mae": str(_median_decimal([t.mae for t in trades])),
+        "avg_final_r": str(
+            sum((t.final_r for t in trades), Decimal("0")) / Decimal(len(trades))
+            if trades
+            else Decimal("0")
+        ),
+        "avg_max_favorable_r": str(
+            sum((t.max_favorable_r for t in trades), Decimal("0")) / Decimal(len(trades))
+            if trades
+            else Decimal("0")
+        ),
+        "avg_max_adverse_r": str(
+            sum((t.max_adverse_r for t in trades), Decimal("0")) / Decimal(len(trades))
+            if trades
+            else Decimal("0")
+        ),
+        "pct_reached_1r": str(
+            Decimal(sum(1 for t in trades if t.reached_1r)) / Decimal(len(trades))
+            if trades
+            else Decimal("0")
+        ),
+        "pct_reached_2r": str(
+            Decimal(sum(1 for t in trades if t.reached_2r)) / Decimal(len(trades))
+            if trades
+            else Decimal("0")
+        ),
+        "pct_reached_3r": str(
+            Decimal(sum(1 for t in trades if t.reached_3r)) / Decimal(len(trades))
+            if trades
+            else Decimal("0")
+        ),
+        "pct_reached_1r_then_negative": str(
+            Decimal(sum(1 for t in trades if t.reached_1r_then_negative)) / Decimal(len(trades))
+            if trades
+            else Decimal("0")
         ),
     }
 

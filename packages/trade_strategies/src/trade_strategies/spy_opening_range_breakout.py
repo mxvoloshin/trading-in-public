@@ -35,6 +35,12 @@ class _SessionState:
     opening_range_mid: Decimal | None = None
     active_stop: Decimal | None = None
     opening_bars: list[Bar] = field(default_factory=_new_bar_list)
+    # All regular-session bars accumulated for ATR and swing calculations.
+    session_bars: list[Bar] = field(default_factory=_new_bar_list)
+    # Whether the trade has reached +1R favorable (for break-even and structure variants).
+    reached_1r: bool = False
+    # The entry price for the current open trade (set when position opens).
+    entry_price: Decimal | None = None
 
 
 @dataclass(slots=True)
@@ -102,6 +108,7 @@ class SpyOpeningRangeBreakoutTrendHoldStrategy:
     def _update_opening_range(self, *, state: _SessionState, bar: Bar) -> None:
         """Capture the first six 5-minute bars as the opening range."""
         state.bars_seen += 1
+        state.session_bars.append(bar)
         if state.bars_seen > 6:
             return
 
@@ -141,10 +148,14 @@ class SpyOpeningRangeBreakoutTrendHoldStrategy:
         if close_price > opening_range_high:
             state.trades_entered += 1
             state.active_stop = self._long_stop_price(state)
+            state.entry_price = close_price
+            state.reached_1r = False
             return DecisionAction.ENTER_LONG, "orb_close_breakout_long"
         if close_price < opening_range_low:
             state.trades_entered += 1
             state.active_stop = self._short_stop_price(state)
+            state.entry_price = close_price
+            state.reached_1r = False
             return DecisionAction.ENTER_SHORT, "orb_close_breakout_short"
         return DecisionAction.HOLD, "breakout_not_confirmed"
 
@@ -250,3 +261,322 @@ class SpyOpeningRangeBreakoutMidpointStopMaxOneStrategy(SpyOpeningRangeBreakoutT
     family_name: ClassVar[str] = "spy-opening-range-breakout-trend-hold"
     variant_name: ClassVar[str] = "orb-midpoint-stop-max-1"
     max_trades_per_day: int = 1
+
+
+@dataclass(slots=True)
+class SpyOrbBreakEvenAfter1RStrategy(SpyOpeningRangeBreakoutTrendHoldStrategy):
+    """ORB variant that moves the stop to break-even after price reaches +1R.
+
+    Entry logic is identical to the baseline. Once the trade reaches +1R
+    favorable (entry_price + R for longs, entry_price - R for shorts), the
+    stop moves to the entry price. If +1R is never reached, the original
+    midpoint stop remains active. EOD flatten is unchanged.
+    """
+
+    name: ClassVar[str] = "spy-opening-range-breakout-trend-hold-breakeven-after-1r-max-1"
+    family_name: ClassVar[str] = "spy-opening-range-breakout-trend-hold"
+    variant_name: ClassVar[str] = "orb-breakeven-after-1r-max-1"
+    max_trades_per_day: int = 1
+
+    def _open_long_decision(
+        self,
+        *,
+        state: _SessionState,
+        bar: Bar,
+        local_time: time,
+    ) -> tuple[DecisionAction, str]:
+        """Exit long at break-even stop (after +1R), midpoint stop, or EOD."""
+        stop_price = _required_decimal(state.active_stop)
+        entry_price = _required_decimal(state.entry_price)
+        risk = entry_price - _required_decimal(state.opening_range_mid)
+        open_price = Decimal(str(bar.open))
+        low_price = Decimal(str(bar.low))
+        high_price = Decimal(str(bar.high))
+        close_price = Decimal(str(bar.close))
+
+        # Check if +1R has been reached using this bar's high.
+        if not state.reached_1r and risk > 0 and high_price >= entry_price + risk:
+            state.reached_1r = True
+            # Move stop to break-even (entry price).
+            state.active_stop = entry_price
+            stop_price = entry_price
+
+        if low_price <= stop_price:
+            stop_reference = min(open_price, stop_price)
+            return DecisionAction.EXIT_LONG, f"orb_stop_long@{stop_reference}"
+        if local_time >= self.flatten_bar:
+            state.active_stop = None
+            return DecisionAction.EXIT_LONG, f"orb_end_of_day_flat_long@{close_price}"
+        return DecisionAction.HOLD, "holding_long_breakout"
+
+    def _open_short_decision(
+        self,
+        *,
+        state: _SessionState,
+        bar: Bar,
+        local_time: time,
+    ) -> tuple[DecisionAction, str]:
+        """Exit short at break-even stop (after +1R), midpoint stop, or EOD."""
+        stop_price = _required_decimal(state.active_stop)
+        entry_price = _required_decimal(state.entry_price)
+        risk = _required_decimal(state.opening_range_mid) - entry_price
+        open_price = Decimal(str(bar.open))
+        high_price = Decimal(str(bar.high))
+        low_price = Decimal(str(bar.low))
+        close_price = Decimal(str(bar.close))
+
+        # Check if +1R has been reached using this bar's low.
+        if not state.reached_1r and risk > 0 and low_price <= entry_price - risk:
+            state.reached_1r = True
+            # Move stop to break-even (entry price).
+            state.active_stop = entry_price
+            stop_price = entry_price
+
+        if high_price >= stop_price:
+            stop_reference = max(open_price, stop_price)
+            return DecisionAction.EXIT_SHORT, f"orb_stop_short@{stop_reference}"
+        if local_time >= self.flatten_bar:
+            state.active_stop = None
+            return DecisionAction.EXIT_SHORT, f"orb_end_of_day_flat_short@{close_price}"
+        return DecisionAction.HOLD, "holding_short_breakout"
+
+
+def _strategy_atr(bars: list[Bar], period: int = 14) -> Decimal | None:
+    """Calculate ATR over the latest completed session bars.
+
+    Uses the same true-range formula as the backtest runner: max(high-low,
+    |high-prev_close|, |low-prev_close|). Returns None when fewer than
+    `period` bars are available.
+    """
+    if len(bars) < period:
+        return None
+    start_index = len(bars) - period
+    true_ranges: list[Decimal] = []
+    for index in range(start_index, len(bars)):
+        bar = bars[index]
+        high = Decimal(str(bar.high))
+        low = Decimal(str(bar.low))
+        previous_close = Decimal(str(bars[index - 1].close)) if index > 0 else None
+        true_range = (
+            high - low
+            if previous_close is None
+            else max(high - low, abs(high - previous_close), abs(low - previous_close))
+        )
+        true_ranges.append(true_range)
+    return sum(true_ranges, Decimal("0")) / Decimal(period)
+
+
+@dataclass(slots=True)
+class SpyOrbAtrTrailStrategy(SpyOpeningRangeBreakoutTrendHoldStrategy):
+    """ORB variant with an ATR-based trailing stop.
+
+    Entry logic is identical to the baseline. After entry, the stop is set
+    at entry ± `atr_multiplier` * ATR(14). Each new bar ratchets the stop:
+    for longs, new_stop = max(current_stop, bar.high - multiplier * ATR);
+    for shorts, new_stop = min(current_stop, bar.low + multiplier * ATR).
+    Before 14 bars are available, the midpoint stop is used as a fallback.
+    EOD flatten is unchanged.
+    """
+
+    atr_multiplier: Decimal = Decimal("1.0")
+
+    def _open_long_decision(
+        self,
+        *,
+        state: _SessionState,
+        bar: Bar,
+        local_time: time,
+    ) -> tuple[DecisionAction, str]:
+        """Exit long at ATR trail stop or EOD."""
+        open_price = Decimal(str(bar.open))
+        low_price = Decimal(str(bar.low))
+        high_price = Decimal(str(bar.high))
+        close_price = Decimal(str(bar.close))
+
+        # Ratchet the trailing stop using this bar's high.
+        atr = _strategy_atr(state.session_bars, period=14)
+        if atr is not None and state.active_stop is not None:
+            new_stop = high_price - self.atr_multiplier * atr
+            # The stop only moves up (ratchets) for a long position.
+            state.active_stop = max(state.active_stop, new_stop)
+
+        stop_price = _required_decimal(state.active_stop)
+        if low_price <= stop_price:
+            stop_reference = min(open_price, stop_price)
+            return DecisionAction.EXIT_LONG, f"orb_stop_long@{stop_reference}"
+        if local_time >= self.flatten_bar:
+            state.active_stop = None
+            return DecisionAction.EXIT_LONG, f"orb_end_of_day_flat_long@{close_price}"
+        return DecisionAction.HOLD, "holding_long_breakout"
+
+    def _open_short_decision(
+        self,
+        *,
+        state: _SessionState,
+        bar: Bar,
+        local_time: time,
+    ) -> tuple[DecisionAction, str]:
+        """Exit short at ATR trail stop or EOD."""
+        open_price = Decimal(str(bar.open))
+        high_price = Decimal(str(bar.high))
+        low_price = Decimal(str(bar.low))
+        close_price = Decimal(str(bar.close))
+
+        # Ratchet the trailing stop using this bar's low.
+        atr = _strategy_atr(state.session_bars, period=14)
+        if atr is not None and state.active_stop is not None:
+            new_stop = low_price + self.atr_multiplier * atr
+            # The stop only moves down (ratchets) for a short position.
+            state.active_stop = min(state.active_stop, new_stop)
+
+        stop_price = _required_decimal(state.active_stop)
+        if high_price >= stop_price:
+            stop_reference = max(open_price, stop_price)
+            return DecisionAction.EXIT_SHORT, f"orb_stop_short@{stop_reference}"
+        if local_time >= self.flatten_bar:
+            state.active_stop = None
+            return DecisionAction.EXIT_SHORT, f"orb_end_of_day_flat_short@{close_price}"
+        return DecisionAction.HOLD, "holding_short_breakout"
+
+
+@dataclass(slots=True)
+class SpyOrbAtrTrail1_0Strategy(SpyOrbAtrTrailStrategy):
+    """ORB ATR trailing stop with 1.0 ATR multiplier."""
+
+    name: ClassVar[str] = "spy-opening-range-breakout-trend-hold-atr-trail-1-0-max-1"
+    family_name: ClassVar[str] = "spy-opening-range-breakout-trend-hold"
+    variant_name: ClassVar[str] = "orb-atr-trail-1-0-max-1"
+    max_trades_per_day: int = 1
+    atr_multiplier: Decimal = Decimal("1.0")
+
+
+@dataclass(slots=True)
+class SpyOrbAtrTrail1_5Strategy(SpyOrbAtrTrailStrategy):
+    """ORB ATR trailing stop with 1.5 ATR multiplier."""
+
+    name: ClassVar[str] = "spy-opening-range-breakout-trend-hold-atr-trail-1-5-max-1"
+    family_name: ClassVar[str] = "spy-opening-range-breakout-trend-hold"
+    variant_name: ClassVar[str] = "orb-atr-trail-1-5-max-1"
+    max_trades_per_day: int = 1
+    atr_multiplier: Decimal = Decimal("1.5")
+
+
+@dataclass(slots=True)
+class SpyOrbAtrTrail2_0Strategy(SpyOrbAtrTrailStrategy):
+    """ORB ATR trailing stop with 2.0 ATR multiplier."""
+
+    name: ClassVar[str] = "spy-opening-range-breakout-trend-hold-atr-trail-2-0-max-1"
+    family_name: ClassVar[str] = "spy-opening-range-breakout-trend-hold"
+    variant_name: ClassVar[str] = "orb-atr-trail-2-0-max-1"
+    max_trades_per_day: int = 1
+    atr_multiplier: Decimal = Decimal("2.0")
+
+
+@dataclass(slots=True)
+class SpyOrbStructureTrailStrategy(SpyOpeningRangeBreakoutTrendHoldStrategy):
+    """ORB variant that trails using recent swing structure after +1R.
+
+    Entry logic is identical to the baseline. Before +1R is reached, the
+    midpoint stop is used. After +1R, the stop trails to the most recent
+    swing low (long) or swing high (short), defined as the extreme of the
+    last 3 completed bars. The trail ratchets in the favorable direction.
+    EOD flatten is unchanged.
+    """
+
+    name: ClassVar[str] = "spy-opening-range-breakout-trend-hold-structure-trail-after-1r-max-1"
+    family_name: ClassVar[str] = "spy-opening-range-breakout-trend-hold"
+    variant_name: ClassVar[str] = "orb-structure-trail-after-1r-max-1"
+    max_trades_per_day: int = 1
+    swing_lookback: int = 3
+
+    def _open_long_decision(
+        self,
+        *,
+        state: _SessionState,
+        bar: Bar,
+        local_time: time,
+    ) -> tuple[DecisionAction, str]:
+        """Exit long at structure trail stop (after +1R), midpoint stop, or EOD."""
+        stop_price = _required_decimal(state.active_stop)
+        entry_price = _required_decimal(state.entry_price)
+        risk = entry_price - _required_decimal(state.opening_range_mid)
+        open_price = Decimal(str(bar.open))
+        low_price = Decimal(str(bar.low))
+        high_price = Decimal(str(bar.high))
+        close_price = Decimal(str(bar.close))
+
+        # Check if +1R has been reached using this bar's high.
+        if not state.reached_1r and risk > 0 and high_price >= entry_price + risk:
+            state.reached_1r = True
+            # Switch to structure trail: use swing low of last N bars.
+            swing_low = self._swing_low(state)
+            if swing_low is not None:
+                state.active_stop = max(_required_decimal(state.active_stop), swing_low)
+
+        # Continue trailing with swing low while +1R has been reached.
+        if state.reached_1r:
+            swing_low = self._swing_low(state)
+            if swing_low is not None:
+                state.active_stop = max(_required_decimal(state.active_stop), swing_low)
+
+        stop_price = _required_decimal(state.active_stop)
+        if low_price <= stop_price:
+            stop_reference = min(open_price, stop_price)
+            return DecisionAction.EXIT_LONG, f"orb_stop_long@{stop_reference}"
+        if local_time >= self.flatten_bar:
+            state.active_stop = None
+            return DecisionAction.EXIT_LONG, f"orb_end_of_day_flat_long@{close_price}"
+        return DecisionAction.HOLD, "holding_long_breakout"
+
+    def _open_short_decision(
+        self,
+        *,
+        state: _SessionState,
+        bar: Bar,
+        local_time: time,
+    ) -> tuple[DecisionAction, str]:
+        """Exit short at structure trail stop (after +1R), midpoint stop, or EOD."""
+        stop_price = _required_decimal(state.active_stop)
+        entry_price = _required_decimal(state.entry_price)
+        risk = _required_decimal(state.opening_range_mid) - entry_price
+        open_price = Decimal(str(bar.open))
+        high_price = Decimal(str(bar.high))
+        low_price = Decimal(str(bar.low))
+        close_price = Decimal(str(bar.close))
+
+        # Check if +1R has been reached using this bar's low.
+        if not state.reached_1r and risk > 0 and low_price <= entry_price - risk:
+            state.reached_1r = True
+            # Switch to structure trail: use swing high of last N bars.
+            swing_high = self._swing_high(state)
+            if swing_high is not None:
+                state.active_stop = min(_required_decimal(state.active_stop), swing_high)
+
+        # Continue trailing with swing high while +1R has been reached.
+        if state.reached_1r:
+            swing_high = self._swing_high(state)
+            if swing_high is not None:
+                state.active_stop = min(_required_decimal(state.active_stop), swing_high)
+
+        stop_price = _required_decimal(state.active_stop)
+        if high_price >= stop_price:
+            stop_reference = max(open_price, stop_price)
+            return DecisionAction.EXIT_SHORT, f"orb_stop_short@{stop_reference}"
+        if local_time >= self.flatten_bar:
+            state.active_stop = None
+            return DecisionAction.EXIT_SHORT, f"orb_end_of_day_flat_short@{close_price}"
+        return DecisionAction.HOLD, "holding_short_breakout"
+
+    def _swing_low(self, state: _SessionState) -> Decimal | None:
+        """Return the lowest low of the last N completed session bars."""
+        if len(state.session_bars) < self.swing_lookback:
+            return None
+        recent = state.session_bars[-self.swing_lookback :]
+        return min(Decimal(str(bar.low)) for bar in recent)
+
+    def _swing_high(self, state: _SessionState) -> Decimal | None:
+        """Return the highest high of the last N completed session bars."""
+        if len(state.session_bars) < self.swing_lookback:
+            return None
+        recent = state.session_bars[-self.swing_lookback :]
+        return max(Decimal(str(bar.high)) for bar in recent)
