@@ -148,9 +148,6 @@ The current branch exposes these built-in CLI strategies:
 
 - `close-momentum`
 - `spy-opening-range-breakout-trend-hold-midpoint-stop-max-1`
-- `spy-opening-range-breakout-trend-hold-midpoint-stop-max-2`
-- `spy-opening-range-breakout-trend-hold-opposite-stop-max-1`
-- `spy-opening-range-breakout-trend-hold-opposite-stop-max-2`
 
 If a strategy is not registered there, it is not runnable from the CLI even if
 older research notes mention it.

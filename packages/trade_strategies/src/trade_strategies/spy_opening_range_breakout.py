@@ -1,4 +1,4 @@
-"""SPY 5-minute opening-range breakout strategy family."""
+"""SPY 5-minute opening-range breakout baseline strategy."""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ class SpyOpeningRangeBreakoutTrendHoldStrategy:
     - use the first 30 regular-session minutes as the opening range
     - wait for a completed-bar breakout after 10:00 New York time
     - enter on the next bar open through the shared runner model
-    - use either the opening-range midpoint or opposite side as the stop
+    - use the opening-range midpoint as the stop
     - force flat into the 15:55-16:00 bar close
     """
 
@@ -54,7 +54,6 @@ class SpyOpeningRangeBreakoutTrendHoldStrategy:
     family_name: ClassVar[str] = "spy-opening-range-breakout-trend-hold"
     variant_name: ClassVar[str] = "orb-midpoint-stop-max-1"
 
-    stop_basis: str = "midpoint"
     max_trades_per_day: int = 1
     entry_start: time = time(10, 0)
     last_entry_bar: time = time(14, 30)
@@ -201,15 +200,11 @@ class SpyOpeningRangeBreakoutTrendHoldStrategy:
 
     def _long_stop_price(self, state: _SessionState) -> Decimal:
         """Return the configured initial stop for long breakouts."""
-        if self.stop_basis == "midpoint":
-            return _required_decimal(state.opening_range_mid)
-        return _required_decimal(state.opening_range_low)
+        return _required_decimal(state.opening_range_mid)
 
     def _short_stop_price(self, state: _SessionState) -> Decimal:
         """Return the configured initial stop for short breakouts."""
-        if self.stop_basis == "midpoint":
-            return _required_decimal(state.opening_range_mid)
-        return _required_decimal(state.opening_range_high)
+        return _required_decimal(state.opening_range_mid)
 
     def _decision(
         self,
@@ -254,38 +249,4 @@ class SpyOpeningRangeBreakoutMidpointStopMaxOneStrategy(SpyOpeningRangeBreakoutT
     name: ClassVar[str] = "spy-opening-range-breakout-trend-hold-midpoint-stop-max-1"
     family_name: ClassVar[str] = "spy-opening-range-breakout-trend-hold"
     variant_name: ClassVar[str] = "orb-midpoint-stop-max-1"
-    stop_basis: str = "midpoint"
     max_trades_per_day: int = 1
-
-
-@dataclass(slots=True)
-class SpyOpeningRangeBreakoutMidpointStopMaxTwoStrategy(SpyOpeningRangeBreakoutTrendHoldStrategy):
-    """ORB baseline with midpoint stop and up to two trades per day."""
-
-    name: ClassVar[str] = "spy-opening-range-breakout-trend-hold-midpoint-stop-max-2"
-    family_name: ClassVar[str] = "spy-opening-range-breakout-trend-hold"
-    variant_name: ClassVar[str] = "orb-midpoint-stop-max-2"
-    stop_basis: str = "midpoint"
-    max_trades_per_day: int = 2
-
-
-@dataclass(slots=True)
-class SpyOpeningRangeBreakoutOppositeStopMaxOneStrategy(SpyOpeningRangeBreakoutTrendHoldStrategy):
-    """ORB baseline with opposite-side stop and one trade per day."""
-
-    name: ClassVar[str] = "spy-opening-range-breakout-trend-hold-opposite-stop-max-1"
-    family_name: ClassVar[str] = "spy-opening-range-breakout-trend-hold"
-    variant_name: ClassVar[str] = "orb-opposite-stop-max-1"
-    stop_basis: str = "opposite"
-    max_trades_per_day: int = 1
-
-
-@dataclass(slots=True)
-class SpyOpeningRangeBreakoutOppositeStopMaxTwoStrategy(SpyOpeningRangeBreakoutTrendHoldStrategy):
-    """ORB baseline with opposite-side stop and up to two trades per day."""
-
-    name: ClassVar[str] = "spy-opening-range-breakout-trend-hold-opposite-stop-max-2"
-    family_name: ClassVar[str] = "spy-opening-range-breakout-trend-hold"
-    variant_name: ClassVar[str] = "orb-opposite-stop-max-2"
-    stop_basis: str = "opposite"
-    max_trades_per_day: int = 2

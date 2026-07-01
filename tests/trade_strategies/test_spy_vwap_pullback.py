@@ -22,7 +22,6 @@ from trade_strategies import (
     OpeningDriveQualityVwapReclaimStrategy,
     RvolBucketVwapReclaimStrategy,
     SpyOpeningRangeBreakoutMidpointStopMaxOneStrategy,
-    SpyOpeningRangeBreakoutMidpointStopMaxTwoStrategy,
     SpyVwapPullbackStrategy,
     SpyVwapRangeReversionOneAndHalfAtrBandStrategy,
     SpyVwapTrendContinuationActiveRvolFilterStrategy,
@@ -95,43 +94,6 @@ def test_orb_midpoint_strategy_exits_long_at_stop_price() -> None:
     assert "orb_stop_long@" in decision.reason
 
 
-def test_orb_max_two_strategy_allows_second_trade_after_first_exit() -> None:
-    strategy = SpyOpeningRangeBreakoutMidpointStopMaxTwoStrategy()
-    first_setup = (
-        _bar(index=0, open=100.0, high=100.4, low=99.9, close=100.1),
-        _bar(index=1, open=100.1, high=100.5, low=100.0, close=100.2),
-        _bar(index=2, open=100.2, high=100.6, low=100.1, close=100.3),
-        _bar(index=3, open=100.3, high=100.7, low=100.2, close=100.4),
-        _bar(index=4, open=100.4, high=100.8, low=100.3, close=100.5),
-        _bar(index=5, open=100.5, high=100.9, low=100.4, close=100.6),
-        _bar(index=6, open=100.6, high=101.2, low=100.5, close=101.1),
-    )
-    _decisions_for_bars(strategy, first_setup, position_quantity=Decimal("0"))
-
-    exit_bar = _bar(index=7, open=100.9, high=101.0, low=100.2, close=100.4)
-    strategy.decide(
-        bar=exit_bar,
-        context=_context(
-            bar=exit_bar,
-            sequence_number=8,
-            previous_bar=first_setup[-1],
-            position_quantity=Decimal("1"),
-        ),
-    )
-
-    second_signal = _bar(index=8, open=100.6, high=101.3, low=100.6, close=101.2)
-    decision = strategy.decide(
-        bar=second_signal,
-        context=_context(
-            bar=second_signal,
-            sequence_number=9,
-            previous_bar=exit_bar,
-            position_quantity=Decimal("0"),
-        ),
-    )
-
-    assert decision.action == DecisionAction.ENTER_LONG
-    assert "orb_close_breakout_long" in decision.reason
 
 
 def test_spy_vwap_pullback_enters_after_pullback_and_trend_resumption() -> None:

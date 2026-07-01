@@ -8,9 +8,6 @@ from trade_strategies.close_momentum import CloseMomentumStrategy
 from trade_strategies.protocols import Strategy
 from trade_strategies.spy_opening_range_breakout import (
     SpyOpeningRangeBreakoutMidpointStopMaxOneStrategy,
-    SpyOpeningRangeBreakoutMidpointStopMaxTwoStrategy,
-    SpyOpeningRangeBreakoutOppositeStopMaxOneStrategy,
-    SpyOpeningRangeBreakoutOppositeStopMaxTwoStrategy,
 )
 
 StrategyFactory = Callable[[], Strategy]
@@ -19,15 +16,6 @@ _STRATEGIES: dict[str, StrategyFactory] = {
     CloseMomentumStrategy.name: CloseMomentumStrategy,
     SpyOpeningRangeBreakoutMidpointStopMaxOneStrategy.name: (
         SpyOpeningRangeBreakoutMidpointStopMaxOneStrategy
-    ),
-    SpyOpeningRangeBreakoutMidpointStopMaxTwoStrategy.name: (
-        SpyOpeningRangeBreakoutMidpointStopMaxTwoStrategy
-    ),
-    SpyOpeningRangeBreakoutOppositeStopMaxOneStrategy.name: (
-        SpyOpeningRangeBreakoutOppositeStopMaxOneStrategy
-    ),
-    SpyOpeningRangeBreakoutOppositeStopMaxTwoStrategy.name: (
-        SpyOpeningRangeBreakoutOppositeStopMaxTwoStrategy
     ),
 }
 
