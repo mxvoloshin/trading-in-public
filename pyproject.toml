@@ -108,3 +108,34 @@ reportUnknownVariableType = false
 reportUnknownArgumentType = false
 reportAttributeAccessIssue = false
 reportArgumentType = false
+
+# The research/ track (SPY 5-min intraday study) is built directly on the
+# untyped pandas/numpy/vectorbt stack for data-quality, market-structure, and
+# backtest-harness scripting. Same rationale as trade_vectorbt: relax the
+# unknown-type/attribute diagnostics for this directory and its tests while the
+# rest of the workspace stays fully strict.
+[[tool.pyright.executionEnvironments]]
+root = "research"
+# research/ is imported as a top-level package (research.lib.*) via a runtime
+# sys.path insert (it is not a uv-workspace member); extraPaths is scoped here
+# so the repo root is only added to resolution for this directory, leaving the
+# rest of the workspace's import resolution untouched.
+extraPaths = ["."]
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportUnknownLambdaType = false
+reportUnknownParameterType = false
+reportAttributeAccessIssue = false
+reportArgumentType = false
+
+[[tool.pyright.executionEnvironments]]
+root = "tests/research"
+extraPaths = ["."]
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportUnknownLambdaType = false
+reportUnknownParameterType = false
+reportAttributeAccessIssue = false
+reportArgumentType = false
