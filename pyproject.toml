@@ -13,6 +13,7 @@ dependencies = [
     "trade-reconcile-app",
     "trade-research-app",
     "trade-strategies",
+    "trade-vectorbt",
 ]
 
 [dependency-groups]
@@ -35,6 +36,7 @@ members = [
     "packages/trade_core",
     "packages/trade_data",
     "packages/trade_strategies",
+    "packages/trade_vectorbt",
 ]
 
 [tool.uv.sources]
@@ -46,10 +48,15 @@ trade-execution-app = { workspace = true }
 trade-reconcile-app = { workspace = true }
 trade-research-app = { workspace = true }
 trade-strategies = { workspace = true }
+trade-vectorbt = { workspace = true }
 
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Notebooks use # %% cell markers with imports spread across cells and long
+# example command lines in markdown comments — both intentional and not
+# subject to the same linting discipline as source code.
+exclude = ["notebooks"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
@@ -63,3 +70,41 @@ pythonVersion = "3.12"
 typeCheckingMode = "strict"
 venvPath = "."
 venv = ".venv"
+# pandas/numba/vectorbt ship without type stubs; missing-stub diagnostics are a
+# library-availability concern rather than a project-code-quality signal, so
+# suppress them globally. All other strict rules stay on for project code.
+reportMissingTypeStubs = false
+
+# trade_vectorbt wraps pandas/numba/vectorbt, which are untyped. Relax the
+# unknown-type and attribute-access rules only for that package (and its
+# tests) so the rest of the workspace stays fully strict. vectorbt's indicator
+# .run() methods return objects whose output accessors (.ma, .rsi, .atr) have
+# no type information, so attribute-access and argument-type diagnostics must
+# also be suppressed. This is the Phase 0 decision documented in
+# docs/architecture/vectorbt-integration-plan.md.
+[[tool.pyright.executionEnvironments]]
+root = "packages/trade_vectorbt"
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportAttributeAccessIssue = false
+reportArgumentType = false
+
+[[tool.pyright.executionEnvironments]]
+root = "tests/trade_vectorbt"
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportAttributeAccessIssue = false
+reportArgumentType = false
+
+# apps/research vbt sub-package wraps trade_vectorbt (pandas/vectorbt),
+# inheriting the same untyped accessors. The relaxation is scoped to this
+# one sub-directory so the rest of the research app stays fully strict.
+[[tool.pyright.executionEnvironments]]
+root = "apps/research/src/trade_research_app/vbt"
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportAttributeAccessIssue = false
+reportArgumentType = false
