@@ -1,0 +1,18 @@
+[project]
+name = "trade-vectorbt"
+version = "0.0.1"
+description = "VectorBT-based backtesting track for fast strategy prototyping."
+requires-python = ">=3.12"
+dependencies = [
+    # numba/llvmlite pinned to the newest pair that ships Intel-macOS cp312 wheels.
+    # Newer llvmlite (0.46+) dropped x86_64 macOS, which would break this dev machine.
+    "llvmlite==0.45.1",
+    "numba==0.62.1",
+    "trade-core",
+    "trade-data",
+    "vectorbt",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

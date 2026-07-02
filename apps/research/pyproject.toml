@@ -8,6 +8,7 @@ dependencies = [
     "trade-core",
     "trade-data",
     "trade-strategies",
+    "trade-vectorbt",
 ]
 
 [build-system]

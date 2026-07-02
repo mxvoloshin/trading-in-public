@@ -95,6 +95,45 @@ def _build_parser() -> argparse.ArgumentParser:
     cost_stress.add_argument("--output", default=None)
     cost_stress.set_defaults(handler=_handle_backtest_cost_stress)
 
+    # VectorBT fast-prototyping subcommand. Strategy-specific parameters
+    # (--fast, --slow, --window, etc.) are shared across all three strategies;
+    # each strategy ignores the ones it doesn't use. This keeps the CLI flat
+    # and avoids per-strategy subparsers for only two or three params each.
+    vbt = backtest_subcommands.add_parser("vbt")
+    vbt.add_argument(
+        "--strategy",
+        required=True,
+        choices=["ma-cross", "rsi-revert", "atr-trail", "orb"],
+        help="vectorbt signal generator to run",
+    )
+    vbt.add_argument("--symbol", required=True)
+    vbt.add_argument("--timeframe", default="5Min")
+    vbt.add_argument("--start", required=True, help="inclusive market-local date, YYYY-MM-DD")
+    vbt.add_argument("--end", required=True, help="inclusive market-local date, YYYY-MM-DD")
+    vbt.add_argument("--market", default="XNYS")
+    vbt.add_argument("--session", default="regular", choices=["regular", "extended", "all"])
+    vbt.add_argument("--cache-dir", default=".data")
+    vbt.add_argument("--output", default=None)
+    # Simulation parameters
+    vbt.add_argument("--init-cash", default="10000")
+    vbt.add_argument("--fees", default="0", help="fraction of trade value (0.001 = 0.1%%)")
+    vbt.add_argument("--slippage", default="0", help="fraction of price (0.001 = 0.1%%)")
+    vbt.add_argument("--direction", default="longonly", choices=["longonly", "shortonly", "both"])
+    vbt.add_argument("--freq", default=None, help="bar freq for annualized metrics (auto-inferred)")
+    vbt.add_argument("--sl-stop", default=None, help="stop-loss fraction (0.03 = 3%%)")
+    vbt.add_argument("--tp-stop", default=None, help="take-profit fraction (0.05 = 5%%)")
+    # Strategy-specific parameters (ignored by strategies that don't use them)
+    vbt.add_argument("--fast", default="10", help="fast MA window for ma-cross")
+    vbt.add_argument("--slow", default="30", help="slow MA window for ma-cross")
+    vbt.add_argument("--window", default="14", help="RSI/ATR lookback window")
+    vbt.add_argument("--lower", default="30", help="RSI lower threshold for rsi-revert")
+    vbt.add_argument("--upper", default="70", help="RSI upper threshold for rsi-revert")
+    vbt.add_argument("--multiplier", default="2", help="ATR multiplier for atr-trail")
+    vbt.add_argument(
+        "--opening-range-bars", default="6", help="bars defining opening range for orb"
+    )
+    vbt.set_defaults(handler=_handle_backtest_vbt)
+
     return parser
 
 
@@ -286,6 +325,88 @@ def _handle_backtest_cost_stress(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_backtest_vbt(args: argparse.Namespace) -> int:
+    """Run a vectorbt fast-prototyping backtest against locally cached bars."""
+    # Lazy import: vectorbt pulls in pandas/numpy/numba (~2s), so we defer it
+    # until the user actually runs ``backtest vbt`` rather than penalising
+    # ``backtest run`` or ``market-data fetch`` startup time.
+    from trade_research_app.vbt import run_vbt_backtest
+
+    request = _historical_bars_request_from_args(args)
+    output_path = (
+        Path(str(args.output))
+        if args.output is not None
+        else _default_vbt_output_path(
+            cache_dir=Path(str(args.cache_dir)),
+            request=request,
+            strategy_name=str(args.strategy),
+        )
+    )
+
+    # Parse optional numeric args that may be None.
+    sl_stop = float(args.sl_stop) if args.sl_stop is not None else None
+    tp_stop = float(args.tp_stop) if args.tp_stop is not None else None
+    freq = str(args.freq) if args.freq is not None else None
+
+    summary = run_vbt_backtest(
+        request=request,
+        cache_dir=Path(str(args.cache_dir)),
+        strategy_name=str(args.strategy),
+        output_path=output_path,
+        init_cash=float(args.init_cash),
+        fees=float(args.fees),
+        slippage=float(args.slippage),
+        direction=str(args.direction),
+        freq=freq,
+        sl_stop=sl_stop,
+        tp_stop=tp_stop,
+        fast=int(args.fast),
+        slow=int(args.slow),
+        window=int(args.window),
+        lower=float(args.lower),
+        upper=float(args.upper),
+        multiplier=float(args.multiplier),
+        opening_range_bars=int(args.opening_range_bars),
+    )
+
+    # Print the full summary so the CLI output is self-describing, mirroring
+    # the existing ``backtest run`` handler's exhaustive print style.
+    print(f"strategy={summary.strategy_name}")
+    print(f"start={summary.start}")
+    print(f"end={summary.end}")
+    print(f"n_bars={summary.n_bars}")
+    print(f"init_cash={summary.init_cash}")
+    print(f"fees={summary.fees}")
+    print(f"slippage={summary.slippage}")
+    print(f"direction={summary.direction}")
+    print(f"freq={summary.freq}")
+    print(f"sl_stop={summary.sl_stop}")
+    print(f"tp_stop={summary.tp_stop}")
+    print(f"sl_trail={summary.sl_trail}")
+    print(f"total_return={summary.total_return}")
+    print(f"cagr={summary.cagr}")
+    print(f"final_value={summary.final_value}")
+    print(f"sharpe_ratio={summary.sharpe_ratio}")
+    print(f"sortino_ratio={summary.sortino_ratio}")
+    print(f"calmar_ratio={summary.calmar_ratio}")
+    print(f"omega_ratio={summary.omega_ratio}")
+    print(f"max_drawdown={summary.max_drawdown}")
+    print(f"max_drawdown_duration_bars={summary.max_drawdown_duration_bars}")
+    print(f"total_trades={summary.total_trades}")
+    print(f"long_trades={summary.long_trades}")
+    print(f"short_trades={summary.short_trades}")
+    print(f"winning_trades={summary.winning_trades}")
+    print(f"losing_trades={summary.losing_trades}")
+    print(f"win_rate={summary.win_rate}")
+    print(f"profit_factor={summary.profit_factor}")
+    print(f"expectancy={summary.expectancy}")
+    print(f"best_trade_return={summary.best_trade_return}")
+    print(f"worst_trade_return={summary.worst_trade_return}")
+    if summary.output_path is not None:
+        print(f"output={summary.output_path}")
+    return 0
+
+
 def _historical_bars_request_from_args(args: argparse.Namespace) -> HistoricalBarsRequest:
     """Convert CLI args into the provider-neutral historical bars request."""
     session_config = get_market_session_config(str(args.market))
@@ -334,6 +455,19 @@ def _default_cost_stress_output_path(
     end = request.end_utc.strftime("%Y%m%dT%H%M%SZ")
     filename = f"{request.instrument.instrument_id}_{request.timeframe}_{start}_{end}.json"
     return cache_dir / "backtests" / "cost-stress" / strategy_name / filename
+
+
+def _default_vbt_output_path(
+    *,
+    cache_dir: Path,
+    request: HistoricalBarsRequest,
+    strategy_name: str,
+) -> Path:
+    """Return the default gitignored vectorbt summary path."""
+    start = request.start_utc.strftime("%Y%m%dT%H%M%SZ")
+    end = request.end_utc.strftime("%Y%m%dT%H%M%SZ")
+    filename = f"{request.instrument.instrument_id}_{request.timeframe}_{start}_{end}.json"
+    return cache_dir / "backtests" / "vbt" / strategy_name / filename
 
 
 def inclusive_local_dates_to_utc_range(
