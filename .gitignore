@@ -26,6 +26,9 @@ __pycache__/
 
 # local trading artifacts
 .data/
+
+# generated chart viewer output
+apps/research/chart_viewer/chart_viewer.html
 data/
 backtests/
 
