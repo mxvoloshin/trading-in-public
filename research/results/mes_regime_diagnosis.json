@@ -1,0 +1,209 @@
+{
+  "long_short_by_year": [
+    {
+      "year": 2016,
+      "long_pnl": -57.0,
+      "short_pnl": 38.0,
+      "total_pnl": -19.0,
+      "spy_return_pct": 11.2,
+      "daily_vol_pct": 0.82
+    },
+    {
+      "year": 2017,
+      "long_pnl": 37.0,
+      "short_pnl": -99.0,
+      "total_pnl": -63.0,
+      "spy_return_pct": 18.5,
+      "daily_vol_pct": 0.42
+    },
+    {
+      "year": 2018,
+      "long_pnl": -537.0,
+      "short_pnl": 297.0,
+      "total_pnl": -239.0,
+      "spy_return_pct": -6.9,
+      "daily_vol_pct": 1.1
+    },
+    {
+      "year": 2019,
+      "long_pnl": 273.0,
+      "short_pnl": -165.0,
+      "total_pnl": 109.0,
+      "spy_return_pct": 28.6,
+      "daily_vol_pct": 0.79
+    },
+    {
+      "year": 2020,
+      "long_pnl": 649.0,
+      "short_pnl": -994.0,
+      "total_pnl": -345.0,
+      "spy_return_pct": 15.1,
+      "daily_vol_pct": 2.16
+    },
+    {
+      "year": 2021,
+      "long_pnl": 1660.0,
+      "short_pnl": 73.0,
+      "total_pnl": 1733.0,
+      "spy_return_pct": 28.7,
+      "daily_vol_pct": 0.83
+    },
+    {
+      "year": 2022,
+      "long_pnl": 613.0,
+      "short_pnl": 1950.0,
+      "total_pnl": 2563.0,
+      "spy_return_pct": -20.0,
+      "daily_vol_pct": 1.52
+    },
+    {
+      "year": 2023,
+      "long_pnl": 106.0,
+      "short_pnl": -145.0,
+      "total_pnl": -39.0,
+      "spy_return_pct": 24.8,
+      "daily_vol_pct": 0.83
+    },
+    {
+      "year": 2024,
+      "long_pnl": 885.0,
+      "short_pnl": 163.0,
+      "total_pnl": 1048.0,
+      "spy_return_pct": 24.0,
+      "daily_vol_pct": 0.79
+    },
+    {
+      "year": 2025,
+      "long_pnl": -130.0,
+      "short_pnl": 995.0,
+      "total_pnl": 865.0,
+      "spy_return_pct": 16.6,
+      "daily_vol_pct": 1.17
+    },
+    {
+      "year": 2026,
+      "long_pnl": 562.0,
+      "short_pnl": -332.0,
+      "total_pnl": 230.0,
+      "spy_return_pct": 9.2,
+      "daily_vol_pct": 0.89
+    }
+  ],
+  "gap_bucket_followthrough": {
+    "buckets": [
+      {
+        "bucket": "0.00-0.15%",
+        "n": 736,
+        "continued_pct": 46.7,
+        "avg_cont_bps": -2.3,
+        "median_cont_bps": -1.5
+      },
+      {
+        "bucket": "0.15-0.30%",
+        "n": 609,
+        "continued_pct": 49.3,
+        "avg_cont_bps": 3.1,
+        "median_cont_bps": -0.3
+      },
+      {
+        "bucket": "0.30-0.50%",
+        "n": 527,
+        "continued_pct": 48.6,
+        "avg_cont_bps": -2.4,
+        "median_cont_bps": -2.8
+      },
+      {
+        "bucket": "0.50-0.80%",
+        "n": 396,
+        "continued_pct": 54.3,
+        "avg_cont_bps": 4.1,
+        "median_cont_bps": 7.4
+      },
+      {
+        "bucket": "0.80-9.00%",
+        "n": 367,
+        "continued_pct": 55.0,
+        "avg_cont_bps": 5.8,
+        "median_cont_bps": 10.9
+      }
+    ],
+    "by_era": {
+      "big_gap_gt_0.5": {
+        "2016-2019": {
+          "n": 214,
+          "continued_pct": 55.1,
+          "avg_cont_bps": 7.2
+        },
+        "2020-2026": {
+          "n": 550,
+          "continued_pct": 54.4,
+          "avg_cont_bps": 3.4
+        }
+      },
+      "small_gap_lt_0.3": {
+        "2016-2019": {
+          "n": 598,
+          "continued_pct": 49.2,
+          "avg_cont_bps": 0.4
+        },
+        "2020-2026": {
+          "n": 747,
+          "continued_pct": 46.9,
+          "avg_cont_bps": -0.1
+        }
+      }
+    }
+  },
+  "baseline_vs_fix": [
+    {
+      "variant": "baseline gap>0.15%",
+      "full_annual_pct": 27.85,
+      "full_total_pnl": 5843.21,
+      "full_max_dd_pct": -52.46,
+      "full_min_equity": 1042.99,
+      "survives_2k": false,
+      "oos_annual_pct": -2.67,
+      "oos_total_pnl": -212.79,
+      "dev_annual_pct": 46.58,
+      "trades": 909,
+      "per_year": {
+        "2016": -19.38,
+        "2017": -62.56,
+        "2018": -239.45,
+        "2019": 108.6,
+        "2020": -344.71,
+        "2021": 1733.32,
+        "2022": 2562.92,
+        "2023": -38.67,
+        "2024": 1048.05,
+        "2025": 865.29,
+        "2026": 229.82
+      }
+    },
+    {
+      "variant": "fix: gap>0.5%",
+      "full_annual_pct": 25.87,
+      "full_total_pnl": 5427.28,
+      "full_max_dd_pct": -27.96,
+      "full_min_equity": 1688.58,
+      "survives_2k": true,
+      "oos_annual_pct": 3.86,
+      "oos_total_pnl": 308.11,
+      "dev_annual_pct": 39.37,
+      "trades": 362,
+      "per_year": {
+        "2016": 39.15,
+        "2017": 79.44,
+        "2018": -22.28,
+        "2019": 211.8,
+        "2020": 127.84,
+        "2021": 1416.64,
+        "2022": 2222.25,
+        "2023": 142.9,
+        "2024": 841.64,
+        "2025": 495.59,
+        "2026": -127.7
+      }
+    }
+  ]
+}
