@@ -1,0 +1,12 @@
+mode,label,contracts,annual_return_pct,cagr_pct,total_pnl,sharpe,sortino,max_drawdown_pct,max_drawdown_dollars,calmar,worst_day_dollars,would_blow_up,total_trades,trades_per_day,long_trades,short_trades,win_rate_pct,profit_factor,expectancy
+naive,BENCH buy-open/flat-close,1,2.68,2.5,347.82,0.02,0.02,-138.09,-4938.21,0.02,-1190.74,True,1632,1.0,1632,0,53.1,1.0,0.21
+naive,S1 ORB (long+short),1,25.22,16.11,3275.96,0.22,0.39,-229.82,-5030.49,0.11,-615.24,True,2154,1.32,1144,1010,38.5,1.03,1.52
+naive,S2 VWAP mean-reversion,1,-183.64,None,-23851.39,-1.76,-1.89,-1030.02,-24729.79,-0.18,-2074.24,True,2564,1.57,1155,1409,58.5,0.76,-9.3
+naive,S3 RSI(14) mean-reversion,1,-112.94,None,-14668.54,-1.17,-1.39,-434.29,-17751.74,-0.26,-996.24,True,1984,1.22,925,1059,53.2,0.82,-7.39
+naive,S4 EMA(9/21) momentum,1,-28.88,None,-3750.47,-0.22,-0.3,-220.14,-5851.54,-0.13,-974.46,True,5046,3.09,2533,2513,36.0,0.98,-0.74
+naive,S5 VWAP+hourly-trend (MTF),1,-111.83,None,-14525.3,-1.19,-2.06,-715.97,-18061.85,-0.16,-597.3,True,5196,3.18,2894,2302,33.2,0.86,-2.8
+risk_managed,S1 ORB (long+short),1,14.0,10.47,1818.84,0.19,0.4,-146.22,-3077.28,0.1,-227.85,True,2154,1.32,1144,1010,37.4,1.02,0.84
+risk_managed,S2 VWAP mean-reversion,1,-212.47,None,-27596.23,-2.21,-2.55,-1333.23,-28140.35,-0.16,-1199.69,True,4516,2.77,2255,2261,45.3,0.81,-6.11
+risk_managed,S3 RSI(14) mean-reversion,1,-164.36,None,-21348.23,-1.96,-2.26,-781.95,-23310.31,-0.21,-1024.84,True,3352,2.05,1702,1650,44.0,0.82,-6.37
+risk_managed,S4 EMA(9/21) momentum,1,-88.37,None,-11477.51,-0.94,-1.27,-583.33,-11592.43,-0.15,-809.07,True,5046,3.09,2533,2513,35.2,0.92,-2.27
+risk_managed,S5 VWAP+hourly-trend (MTF),1,-109.92,None,-14277.03,-1.5,-2.6,-789.26,-15794.0,-0.14,-349.09,True,5196,3.18,2894,2302,33.4,0.86,-2.75
