@@ -47,10 +47,18 @@ $2,000.**
   ($1,580) safely above margin. The higher-return versions are genuinely good — they just need
   **~$3,000-4,000** to be traded without ruin.
 
-**Bottom line:** you were right that exits were under-explored, and the payoff was large. Optimizing
-the exit produced the **first configuration in the whole project that clears 20%, survives on
-$2,000, and holds out-of-sample** — gap-and-go + ATR stop + a 10:30 exit. It is not a fantasy
-number on a curve the account can't survive; it stays above the margin line the entire 6.5 years.
+**Bottom line:** you were right that exits were under-explored, and within 2020→2026 the payoff was
+large — optimizing the exit produced a config that clears 20%, survives $2,000, and is positive in
+both halves of that window (gap-and-go + ATR stop + a 10:30 exit).
+
+**⚠️ Update — the honest verdict after a true out-of-sample test (§6): the edge is regime-conditional,
+not all-weather.** Re-running the *identical* strategy on a fully held-out **2016-2019** period (never
+touched in development) gives **roughly flat-to-negative returns at every exit time** — it made
+essentially nothing in 2016-2017's low-volatility grind and lost through 2018's whipsaw corrections,
+only "working" in the higher-volatility 2020-2026 regime. The 2020→2026 train/test robustness was
+real but *confined to one favorable macro regime*. This does not make the exit finding wrong — the
+exit still dominates the entry, and the mechanism is sound — but it disqualifies the strategy as a
+deploy-ready 20% engine and is exactly the kind of thing an out-of-sample test exists to catch.
 
 ![Exit-strategy comparison](../charts/mes_exit_strategy_comparison.png)
 
@@ -184,7 +192,53 @@ even run the better exit without a margin call.
 
 ---
 
-## 6. Honest caveats
+## 6. Out-of-sample test — 2016-2019 (the edge is regime-conditional)
+
+The strongest possible check: run the **exact same strategy and parameters** (gap-and-go, default
+0.15% gap threshold, ATR(1.0) stop, the same exit times — *nothing re-tuned*) on **2016-2019**, a
+period never used in development. Script: `research/mes_intraday/run_oos_2016.py`.
+Data is clean (78,438 bars, 1,006 days, 0 corrupt, 65-93 trades/yr — comparable activity to the dev
+window), so this is a real result, not a data artifact.
+
+**It does not hold up.** Same strategy, 1 contract on $2,000:
+
+| Exit | OOS 2016-2019 ann. % | OOS Sharpe | OOS Max DD % | Survives $2k? | DEV 2020-2026 ann. % |
+|---|---|---|---|---|---|
+| 10:30 | **−9.5** | −0.76 | −52 | No | +22.9 |
+| 11:00 | −5.0 | −0.34 | −38 | No | +34.7 |
+| 12:00 | −6.8 | −0.42 | −48 | No | +38.0 |
+| 13:00 | **−2.7** | −0.14 | −39 | No | +46.8 |
+| 14:00 | +0.5 | 0.03 | −38 | No | +41.1 |
+| 15:00 | +0.8 | 0.04 | −39 | No | +39.7 |
+
+Every exit time is **flat-to-negative** out-of-sample, versus +23% to +47% in development. **None**
+survive the $2,000 margin. OOS per-year P&L (13:00 exit): 2016 −$19 · 2017 −$63 · **2018 −$239** ·
+2019 +$109 — a near-continuous bleed, worst in 2018.
+
+**Why it fails, and why that's economically coherent:**
+- **2017 was the lowest-volatility year in market history.** Overnight gaps were small (median
+  |gap| 0.16% vs 0.25-0.31% in the other years) with little follow-through — gap-and-go momentum
+  needs volatility, and 2017 starved it.
+- **2018's two corrections** (the February "volmageddon" VIX spike and the Q4 selloff) were
+  full of *gap reversals* — the market gapped and then went the other way, running a
+  momentum-continuation entry straight over. 2018 is the biggest loser in every column.
+- **2020-2026 was unusually kind to overnight-gap momentum** — COVID volatility, 2021's
+  retail-momentum melt-up, 2022's trending bear, 2025's volatility. Those are exactly the regimes
+  where gaps trend rather than fade.
+
+![OOS 2016→2026 equity](../charts/mes_oos_2016_equity.png)
+
+**The takeaway:** the within-2020-2026 train/test split *was* honest, but a train/test split inside
+one macro regime can only prove robustness *to that regime*. A true held-out decade shows the
+gap-and-go edge is **conditional on a higher-volatility, trending-gap environment** and disappears
+in a low-vol / mean-reverting one. The exit-optimization lesson still stands (the exit dominates the
+entry, and midday exits beat EOD holds in both windows *directionally*), but the specific strategy is
+**not a deploy-ready all-weather 20% engine** — it is a bet that the 2020s volatility regime
+persists.
+
+---
+
+## 7. Honest caveats
 
 - **This is the one place I selected a parameter (exit time) partly on the full sample.** The
   mitigation is real — it is a *plateau* that is positive out-of-sample at every exit time, which
@@ -202,34 +256,47 @@ even run the better exit without a margin call.
 
 ---
 
-## 7. Conclusion & what changed
+## 8. Conclusion & what changed
 
-Across the three MES reports the arc is: (1) the standard entries can't clear a survivable 20%;
-(2) six *novel entries* don't either, though gap/trend momentum is best-behaved; (3) **the exit was
-the untested lever, and pulling it produced the project's first robust, survivable ≥20% result.**
+Across the MES reports the arc is: (1) the standard entries can't clear a survivable 20%; (2) six
+*novel entries* don't either, though gap/trend momentum is best-behaved; (3) **the exit was the
+untested lever, and pulling it dominated the entry** — midday time-of-day exits beat the EOD hold in
+every window tested, which is a genuine and durable methodological lesson.
 
-The specific keeper — **gap-and-go entry + ATR stop + 10:30 exit, +22.9%/yr, robust, survives
-$2,000** — is modest but real, and the same entry with a midday exit reaches +35-47% on a slightly
-larger account. The lesson generalizes: for a decaying-edge intraday signal, *when you get out*
-matters as much as *why you got in*. Sensible next steps: (a) promote this to the internal
-event-driven engine for exact fills; (b) re-test on real MES bars; (c) trade it on ≥$3k so the
-higher, still-robust exits are usable.
+But the honest final verdict, after the 2016-2019 out-of-sample test (§6), is that **the specific
+keeper is a regime bet, not a deploy-ready 20% engine.** Gap-and-go + ATR stop + a midday exit made
++23-47%/yr in 2020-2026 and roughly nothing (−10% to +1%) in 2016-2019; the edge lives in
+higher-volatility, trending-gap regimes and vanishes in the low-vol/whipsaw ones. Two takeaways stand:
+
+- **Keep (methodology):** for a decaying-edge intraday signal, *when you exit* matters as much as
+  *why you entered* — exit optimization is a real, transferable lever the earlier rounds ignored.
+- **Don't trust (this strategy, as-is):** its returns are conditional on the 2020s volatility regime
+  persisting. A true held-out decade — not a within-regime train/test split — was needed to see that.
+
+Sensible next steps: (a) build a **volatility filter** so the strategy only trades in the regimes
+where the edge exists (and sits out low-vol years like 2017), then re-test that OOS; (b) promote the
+exit engine to the internal event-driven engine for exact fills; (c) re-test on real MES bars. Do
+**not** deploy the current strategy against a 20% target expecting 2020-2026-like results.
 
 ---
 
-## 8. Files & rerun
+## 9. Files & rerun
 
 **New:** `research/mes_intraday/exits.py` (exit engine), `research/mes_intraday/run_exits.py`,
 `research/mes_intraday/make_exit_chart.py`, `research/mes_intraday/run_account_sizing.py` (§5),
-`research/mes_intraday/make_sizing_chart.py`, `research/results/mes_exits_summary.json`,
-`research/results/mes_account_sizing.json`, `research/charts/mes_exit_strategy_comparison.png`,
-`research/charts/mes_account_sizing_5k.png`, three added tests, this report.
+`research/mes_intraday/make_sizing_chart.py`, `research/mes_intraday/run_oos_2016.py` (§6),
+`research/mes_intraday/make_oos_chart.py`, `research/results/mes_exits_summary.json`,
+`research/results/mes_account_sizing.json`, `research/results/mes_oos_2016.json`,
+`research/charts/mes_exit_strategy_comparison.png`, `research/charts/mes_account_sizing_5k.png`,
+`research/charts/mes_oos_2016_equity.png`, three added tests, this report.
 
 ```bash
 uv run python research/mes_intraday/run_exits.py
 uv run python research/mes_intraday/make_exit_chart.py
 uv run python research/mes_intraday/run_account_sizing.py   # §5 account-size table
 uv run python research/mes_intraday/make_sizing_chart.py    # $5k chart
+uv run python research/mes_intraday/run_oos_2016.py         # §6 out-of-sample 2016-2019
+uv run python research/mes_intraday/make_oos_chart.py       # OOS equity chart
 uv run pytest tests/research/test_mes_intraday.py -q
 uv run ruff check research/mes_intraday tests/research/test_mes_intraday.py
 ```
