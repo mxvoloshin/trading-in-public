@@ -32,6 +32,9 @@ apps/research/chart_viewer/chart_viewer.html
 data/
 backtests/
 
+# local working notes (may contain account-specific details)
+DOCUMENTATION.md
+
 # macOS-specific files
 .DS_Store
 
