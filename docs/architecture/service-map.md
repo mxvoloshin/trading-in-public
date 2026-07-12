@@ -146,6 +146,8 @@ Must not:
 - become the place where strategy decisions are made
 - force the entire system to know about one broker wrapper choice
 
+For IBKR connection setup, contract resolution, order lifecycle, and reliability patterns, see [IBKR Bot Integration](../ibkr-bot-integration.md).
+
 ## Reconciliation
 
 Purpose:
